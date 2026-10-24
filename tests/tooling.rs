@@ -397,6 +397,44 @@ fn bump_script_dry_run_writes_nothing() {
 }
 
 #[test]
+fn bump_script_prints_commands_that_paste_verbatim() {
+    let repo = ScratchRepo::new("bump-paste");
+    copy_into(&repo, "scripts/bump-version.ps1");
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "--quiet", "--message", "chore: fixture"]);
+
+    let output = run_bump(&repo, &["minor"]);
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // The release steps are meant to be selected and pasted into a shell, so
+    // every command line must start at column 0 with no list numbering. An
+    // indented "1. git ..." block is not runnable, which is what this guards.
+    let commands: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.starts_with("git ") || line.starts_with("gh "))
+        .collect();
+
+    assert_eq!(
+        commands,
+        [
+            "git switch -c release/v0.2.0",
+            "git commit -am 'chore: bump version to 0.2.0'",
+            "git push -u origin release/v0.2.0",
+            "gh pr create --fill --base main",
+        ],
+        "release commands must be pasteable as printed:\n{stdout}"
+    );
+
+    // No leftovers of an indented or numbered variant.
+    assert!(
+        !stdout
+            .lines()
+            .any(|line| line.starts_with(' ') && (line.contains("git ") || line.contains("gh "))),
+        "an indented command would paste with leading whitespace:\n{stdout}"
+    );
+}
+
+#[test]
 fn bump_script_refuses_to_bump_a_dirty_tree() {
     let repo = ScratchRepo::new("bump-dirty");
     copy_into(&repo, "scripts/bump-version.ps1");
