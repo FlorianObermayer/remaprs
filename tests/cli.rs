@@ -253,6 +253,34 @@ fn run_only_flags_are_not_available_to_config_check() {
 }
 
 #[test]
+fn every_version_flag_prints_the_crate_version() {
+    // `-V` is clap's convention and `-v` is what people try first; both must
+    // print the version rather than fall through to the run path.
+    for flag in ["-V", "-v", "--version"] {
+        let error = Cli::try_parse_from(["remaprs", flag]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayVersion, "flag {flag}");
+        assert_eq!(
+            error.to_string().trim(),
+            concat!("remaprs ", env!("CARGO_PKG_VERSION")),
+            "flag {flag} printed an unexpected version line"
+        );
+    }
+}
+
+#[test]
+fn help_states_the_version() {
+    // The version belongs in the help header: a bug report that pastes `-h`
+    // should say which build produced it.
+    let error = Cli::try_parse_from(["remaprs", "--help"]).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    let help = error.to_string();
+    assert!(
+        help.starts_with(concat!("remaprs ", env!("CARGO_PKG_VERSION"))),
+        "help does not open with the version:\n{help}"
+    );
+}
+
+#[test]
 fn an_explicit_config_wins_over_the_auto_loaded_file() {
     let exe_dir = PathBuf::from("apps").join("remaprs");
     let auto = candidate_path(&exe_dir);
