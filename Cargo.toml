@@ -1,0 +1,67 @@
+[package]
+name = "remaprs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Rebinds a held controller button or keyboard key to randomized keyboard or mouse input, including spams, holds and parallel sequences"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/FlorianObermayer/remaprs"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "0.10"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_XboxController",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+# Groups get a lower priority than the individual entries below, so a single
+# `allow` can still override a group without Cargo complaining.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Useful restriction lints. These are opt-in because they are occasionally
+# wrong, not because they are unimportant.
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"
+
+# Pedantic lints that do not fit this crate.
+module_name_repetitions = "allow"
+
+# Duplicate versions arrive transitively from proc-macro dependencies (syn 2 and
+# 3 are both required); nothing in this manifest can resolve that.
+multiple_crate_versions = "allow"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Machine-readable counterpart to the "AI assistance" section in README.md, so
+# scanners and tooling can find the disclosure without parsing prose.
+[package.metadata.ai]
+assisted = true
+tools = ["GitHub Copilot (VS Code agent)"]
+disclosure = "README.md#ai-assistance"

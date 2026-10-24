@@ -1,0 +1,76 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run (example config)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--release", "--bin=remaprs"],
+        "filter": {
+          "name": "remaprs",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "--config",
+        "examples/remaprs.yaml"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Run (dry run)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--release", "--bin=remaprs"],
+        "filter": {
+          "name": "remaprs",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "--config",
+        "examples/remaprs.yaml",
+        "--dry-run"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Run (list buttons)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--release", "--bin=remaprs"],
+        "filter": {
+          "name": "remaprs",
+          "kind": "bin"
+        }
+      },
+      "args": ["--list-buttons"],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Debug (breakpoints, example config)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--bin=remaprs"],
+        "filter": {
+          "name": "remaprs",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "--config",
+        "examples/remaprs.yaml",
+        "--dry-run"
+      ],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"]
+    }
+  ]
+}

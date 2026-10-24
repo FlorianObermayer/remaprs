@@ -1,0 +1,137 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build"],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "build (release)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--release"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test"],
+      "problemMatcher": [],
+      "group": "test",
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "check (fmt, clippy, test, deny, release)",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/check.ps1"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "start",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release",
+        "--",
+        "--config",
+        "examples/remaprs.yaml"
+      ],
+      "problemMatcher": [],
+      "dependsOn": "build (release)",
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "start (dry run)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release",
+        "--",
+        "--config",
+        "examples/remaprs.yaml",
+        "--dry-run"
+      ],
+      "problemMatcher": [],
+      "dependsOn": "build (release)",
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "start (list buttons)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "--release", "--", "--list-buttons"],
+      "problemMatcher": [],
+      "dependsOn": "build (release)",
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "start (logged)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release",
+        "--",
+        "--config",
+        "examples/remaprs.yaml",
+        "--log-file",
+        "remaprs.log"
+      ],
+      "problemMatcher": [],
+      "dependsOn": "build (release)",
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "config check (example)",
+      "type": "shell",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release",
+        "--",
+        "config",
+        "check",
+        "-c",
+        "examples/remaprs.yaml"
+      ],
+      "problemMatcher": [],
+      "dependsOn": "build (release)",
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    }
+  ]
+}

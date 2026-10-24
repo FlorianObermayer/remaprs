@@ -1,0 +1,110 @@
+# remaprs
+#
+# Rebinds a held controller button or keyboard key to randomized keyboard or
+# mouse input.
+#
+# Every value below is optional except `bindings`.
+#
+# This is the file `remaprs config init` writes. Put it next to remaprs.exe as
+# `remaprs.yaml` and it is loaded automatically; otherwise pass `--config`.
+# Check it with `remaprs config check`; `remaprs --help` lists the flags that
+# override individual values.
+
+version: 1
+
+device:
+  # XInput slot: 0-3.
+  index: 0
+  # How often the pad and the keyboard are read. 1-50 ms; lower reacts sooner.
+  poll_interval_ms: 4
+  # LT and RT are analog (0-255) and count as pressed from this value up.
+  trigger_threshold: 30
+
+output:
+  # `scancode` works with DirectInput and raw-input games.
+  # `virtual_key` is the fallback when a game ignores scan codes.
+  key_mode: scancode
+
+hotkey:
+  # Suspends and resumes all mappings without quitting. `none` disables it.
+  toggle: F12
+
+safety:
+  # Only emit while this executable is focused, e.g. "Game.exe".
+  # Empty means the guard is inactive.
+  target_process: null
+  require_focused: true
+  # Release every synthetic key on exit. Leave this on.
+  release_on_exit: true
+
+bindings:
+  # Hold A -> SPACE. The first press lands as soon as A goes down and stays down
+  # for 15-35 ms; after a 40-90 ms pause the next press starts. One full cycle
+  # is therefore hold + pause = 55-125 ms.
+  # A single `key` with no `steps` is a one-step sequence that repeats.
+  - from: A
+    key: SPACE
+    pause_ms: [40, 90]
+    hold_ms: [15, 35]
+
+  # Hold LB -> left mouse button; a 10 ms click every 40 + 10 ms.
+  - from: LB
+    key: MOUSE_LEFT
+    pause_ms: 40
+    hold_ms: 10
+
+  # Hold the right trigger -> E, with a slower rhythm.
+  - from: RT
+    key: E
+    pause_ms: [70, 140]
+    hold_ms: [12, 25]
+
+  # Hold Q on the keyboard -> V, using the same machinery.
+  # `source: keyboard` is required because the button and keyboard namespaces
+  # overlap; without it the binding would be read from the pad.
+  - source: keyboard
+    from: Q
+    key: V
+    pause_ms: 50
+    hold_ms: 20
+
+  # A delayed variant: wait 100-200 ms before the first press, then fire.
+  - source: keyboard
+    from: R
+    key: B
+    pause_ms: 60
+    hold_ms: 20
+    initial_delay_ms: [100, 200]
+
+  # One trigger, several keys: holding X spams Y while keeping Z held down.
+  # `mode: hold` presses Z once and only releases it when X is let go.
+  # Outputs inherit `mode`, `pause_ms`, `hold_ms` and `initial_delay_ms`
+  # from the binding, so only the differences need writing.
+  - from: X
+    outputs:
+      - key: Y
+        pause_ms: [40, 90]
+        hold_ms: [15, 35]
+      - key: Z
+        mode: hold
+
+  # A sequence: holding Y plays G -> H -> G, each step held for 30-80 ms and
+  # followed by a 100-250 ms pause, then loops until Y is released.
+  # Every output `initial_delay_ms` can shift a step in; a parallel `hold`
+  # output with its own `hold_ms` can outlast (or undercut) the sequence.
+  - from: Y
+    outputs:
+      - mode: sequence
+        initial_delay_ms: [0, 50]
+        repeat: true
+        steps:
+          - key: G
+            hold_ms: [30, 80]
+            pause_ms: [100, 250]
+          - key: H
+            hold_ms: [40, 60]
+            pause_ms: [150, 300]
+      # Held for exactly 2-3 s, regardless of how the sequence above loops.
+      - key: T
+        mode: hold
+        hold_ms: [2000, 3000]

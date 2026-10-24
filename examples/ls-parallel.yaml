@@ -1,0 +1,64 @@
+# remaprs
+#
+# Hold LS -> two things in parallel:
+#
+#   1. wait 3-10 ms, then hold W for 89-95 ms
+#   2. J for 12-20 ms, pause 30-50 ms, J for 12-20 ms, looping while LS is held
+#
+# Both outputs start on the same LS edge and then run on their own schedules.
+
+version: 1
+
+device:
+  index: 0
+  poll_interval_ms: 4
+  trigger_threshold: 30
+
+output:
+  # `scancode` works with DirectInput and raw-input games; switch to
+  # `virtual_key` if the game ignores the synthetic presses.
+  key_mode: scancode
+
+hotkey:
+  toggle: F12
+
+safety:
+  target_process: null
+  require_focused: true
+  release_on_exit: true
+
+bindings:
+  - from: LS
+    outputs:
+      # 1) The delay shifts the whole output, then W goes down once and comes
+      #    back up after its own hold. Releasing LS early cuts it short.
+      - mode: hold
+        key: W
+        initial_delay_ms: [3, 10]
+        hold_ms: [89, 95]
+
+      # 2) One step per cycle: press J, hold it 12-20 ms, then pause 30-50 ms
+      #    before pressing it again. `repeat: true` keeps that going for as
+      #    long as LS is held.
+      - mode: sequence
+        repeat: true
+        steps:
+          - key: J
+            hold_ms: [12, 20]
+            pause_ms: [30, 50]
+
+      # If you want exactly two J presses per LS press instead of a continuous
+      # stream, drop `repeat` and list the step twice:
+      #
+      #   - mode: sequence
+      #     repeat: false
+      #     steps:
+      #       - key: J
+      #         hold_ms: [12, 20]
+      #         pause_ms: [30, 50]
+      #       - key: J
+      #         hold_ms: [12, 20]
+      #         pause_ms: [30, 50]
+      #
+      # Outputs inherit `mode`, `pause_ms`, `hold_ms` and `initial_delay_ms`
+      # from the binding, so the same thing can be written more compactly.

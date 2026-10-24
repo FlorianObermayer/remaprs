@@ -1,0 +1,21 @@
+{
+  "// note": "Diagnostics use the same command as scripts/check.ps1 so the editor and the CLI agree.",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--all-targets", "--", "-D", "warnings"],
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.eol": "\n",
+  "search.exclude": {
+    "**/target": true
+  },
+  "files.watcherExclude": {
+    "**/target/**": true
+  },
+  "cSpell.words": [
+    "remaprs"
+  ]
+}

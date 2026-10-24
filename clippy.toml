@@ -1,0 +1,22 @@
+# Clippy configuration for remaprs.
+#
+# `msrv` keeps Clippy from suggesting APIs newer than the declared minimum
+# supported Rust version in Cargo.toml.
+msrv = "1.88"
+
+# Allowed by `#[allow(...)]` names are checked too, so a stale allow is an error.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Domain rules that a generic linter cannot know about.
+disallowed-methods = [
+  { path = "std::process::abort", reason = "would skip the key-release guard and could leave a synthetic key held" },
+  { path = "std::process::exit", reason = "skips Drop, so the key-release guard would not run; return ExitCode instead" },
+  { path = "std::env::set_var", reason = "unsafe in edition 2024 and unnecessary here" },
+  { path = "std::env::remove_var", reason = "unsafe in edition 2024 and unnecessary here" },
+]
+
+disallowed-types = [
+  { path = "std::sync::Mutex", reason = "the runner is single-threaded; use atomics for the shutdown and toggle flags" },
+  { path = "std::sync::RwLock", reason = "the runner is single-threaded; use atomics for the shutdown and toggle flags" },
+]

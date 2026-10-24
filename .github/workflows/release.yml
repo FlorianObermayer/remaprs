@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (must already exist and match the Cargo.toml version)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-gnu
+
+jobs:
+  release:
+    name: build and attach archive
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW-w64 on PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\ucrt64\bin'
+
+      - name: Install toolchain
+        shell: pwsh
+        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # A tag can point at a commit that never ran CI, so gate the upload on the
+      # same checks rather than trusting that it did. This also produces the
+      # release binary, which is why packaging below reuses it.
+      - name: Check
+        shell: pwsh
+        run: ./scripts/check.ps1
+
+      # The archive name embeds the version, so a tag that disagrees with
+      # Cargo.toml would publish a file that does not match its release.
+      - name: Verify tag matches the crate version
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq 'remaprs').version
+          if ($env:TAG -ne "v$version") {
+            Write-Error "tag $env:TAG does not match version v$version in Cargo.toml"
+            exit 1
+          }
+
+      - name: Build archive
+        shell: pwsh
+        run: ./scripts/release.ps1 -SkipBuild
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: remaprs ${{ inputs.tag || github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          body: |
+            Windows x64, single executable, no runtime dependencies.
+
+            remaprs is developed with AI assistance; see the "AI assistance"
+            section of the README. The binaries are built from this tag by
+            GitHub Actions, and the attached `.zip.sha256` matches the archive.
+
+            Read the "Limitations" section before using it in a game.
+          files: |
+            dist/*.zip
+            dist/*.zip.sha256
