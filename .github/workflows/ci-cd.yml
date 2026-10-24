@@ -62,18 +62,19 @@ jobs:
         shell: pwsh
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: cargo test
-        shell: pwsh
-        run: cargo test --locked
-
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
 
-      # tests/tooling.rs runs the real release scripts, which call git-cliff.
+      # tests/tooling.rs runs the real release scripts, which call git-cliff, so
+      # this must come before `cargo test` rather than after it.
       - uses: taiki-e/install-action@v2
         with:
           tool: git-cliff
+
+      - name: cargo test
+        shell: pwsh
+        run: cargo test --locked
 
       - name: cargo deny
         shell: pwsh
