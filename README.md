@@ -347,6 +347,8 @@ only useful for debugging.
     --no-focus-guard             Ignore safety.target_process
     --log-level <LEVEL>          error | warn | info | debug | trace
     --log-file <FILE>            Append every log line to this file
+-V, -v, --version                Print the version and exit
+-h, --help                       Print help; `--help` adds longer descriptions
 
 config init [FILE] [--force] [--stdout]
                                  Write a commented starter remaprs.yaml
@@ -362,6 +364,11 @@ exits non-zero when there is one. It accepts `--config`, `--no-config`,
 `--device`, `--set`, `--set-key`, `--toggle-hotkey` and `--no-focus-guard`, so
 it checks the same effective configuration the run would use. `--dry-run` and
 `--list-buttons` are deliberately not accepted: they belong to a run.
+
+`remaprs -v` (or `-V`, or `--version`) prints `remaprs <version>` and exits; the
+same line heads the output of `-h`, so a pasted help message identifies the
+build. Version flags stop before a run starts, so they never touch a controller
+or a configuration file.
 
 `--set` and `--set-key` may be repeated, e.g. `--set A=SPACE:40-90:15-35` and
 `--set-key Q=E:50:20`. They replace an existing binding for the same trigger, so

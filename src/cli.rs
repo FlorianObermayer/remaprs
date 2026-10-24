@@ -46,12 +46,34 @@ The annotated reference is examples/remaprs.yaml; README.md documents every key.
 #[derive(Debug, Parser)]
 #[command(
     name = "remaprs",
-    version,
+    // Two version flags on purpose: `-V` is clap's convention (`--help`'s own
+    // synopsis advertises it), and `-v` is what people reach for first. Both
+    // print the same line; neither is an alias of `--verbose`, which is why
+    // verbosity is spelled `--log-level`.
+    // `version` is the bare string, not "remaprs {version}": clap prepends the
+    // command name itself, and passing both printed "remaprs remaprs 0.1.0".
+    version = env!("CARGO_PKG_VERSION"),
+    disable_version_flag = true,
     about = "Turns a held controller button or keyboard key into randomized keyboard, mouse or sequenced input",
+    // Printed above the description so the version is the first thing `-h`
+    // shows; `--version` alone is easy to forget when filing a bug report.
+    before_help = concat!("remaprs ", env!("CARGO_PKG_VERSION")),
     long_about = None,
     after_help = AFTER_HELP,
 )]
 pub struct Cli {
+    /// Print the version and exit.
+    ///
+    /// `-v` is accepted alongside clap's conventional `-V`; both print the same
+    /// line, and neither is a `--verbose` switch (verbosity is `--log-level`).
+    #[arg(
+        short = 'V',
+        long = "version",
+        visible_short_alias = 'v',
+        action = clap::ArgAction::Version
+    )]
+    version: Option<bool>,
+
     /// Maintenance commands that need no controller.
     #[command(subcommand)]
     pub command: Option<Command>,
