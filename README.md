@@ -508,25 +508,33 @@ example config into `dist\remaprs-<version>-x86_64-pc-windows-gnu.zip` and print
 its SHA256. The same layout is what the workflow attaches to a GitHub release, so
 a local zip can be uploaded by hand if CI is unavailable.
 
-The version comes from `Cargo.toml`; no script edits it. **Bumping it is the
-release trigger**: the workflow asks whether a release for `v<version>` exists
-yet, and a version that has never been released gets a stable release. To cut
-one:
+The version comes from `Cargo.toml`; no script edits it. **Merging a version
+bump into `main` is the release trigger**: the workflow asks whether a release
+for `v<version>` exists yet, and a version that has never been released gets a
+stable release. `main` is protected, so the bump goes through a pull request
+rather than a direct push:
 
 ```powershell
 ./scripts/bump-version.ps1 minor   # or patch / major, or -DryRun to preview
+git switch -c release/v0.2.0
 git commit -am "chore: bump version to 0.2.0"
-git push origin main                # publishes v0.2.0
+git push -u origin release/v0.2.0
+gh pr create --fill --base main
 ```
 
-The bump script rewrites the `Cargo.toml` version line and runs
+Merging that PR is the release. `main` only accepts **rebase merges** (merge
+commits and squash are disabled, and history must be linear), and the
+`fmt, clippy, test, deny` and `release archive` checks must pass first. No admin
+bypass is configured, so this applies to the maintainer too.
+
+`bump-version.ps1` rewrites the `Cargo.toml` version line and runs
 `cargo update --workspace` so `Cargo.lock` matches; a lock file left behind by a
 manual edit makes `--locked` builds fail. It refuses to run on a working tree
-with uncommitted changes, and it stops there: committing is a deliberate step,
-and the tag itself is created by the release job. Pushing a tag by hand does
-nothing on its own.
+with uncommitted changes, and it stops at the four commands above: the commit,
+the PR and the tag are separate, deliberate steps. Pushing a tag by hand does
+nothing on its own — the release job creates it.
 
-Every later push to `main` under an already-released version instead refreshes
+Every later merge into `main` under an already-released version instead refreshes
 a rolling `nightly` pre-release, which is deleted when the next version ships.
 Neither path publishes a zip without the checks having passed on that commit.
 

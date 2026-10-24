@@ -16,6 +16,10 @@ cargo install --locked git-cliff
 Then `./scripts/check.ps1` must pass. CI runs the same gates on
 `windows-latest`; see [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml).
 
+`main` is protected: changes arrive through a pull request, and only rebase
+merges are allowed. Rebase your branch rather than adding a merge commit, or the
+merge will be rejected for breaking linear history.
+
 ## Ground rules
 
 * Every feature or bug fix needs a test. Deterministic tests are preferred: feed

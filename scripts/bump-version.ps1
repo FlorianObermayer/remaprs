@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Bumps the crate version and refreshes Cargo.lock, so the only remaining step
-# is committing and pushing.
+# is committing the result and getting it onto main through a pull request.
 #
 # Usage:
 #   ./scripts/bump-version.ps1          # patch bump: 0.1.0 -> 0.1.1
@@ -8,9 +8,10 @@
 #   ./scripts/bump-version.ps1 major    # 0.1.0 -> 1.0.0
 #   ./scripts/bump-version.ps1 -DryRun  # print the change without writing it
 #
-# Pushing the bump commit to main is what publishes a release: see the
-# "Releasing" section of README.md. This script does not commit, tag, push or
-# upload anything.
+# The bump commit has to reach main for the release workflow to publish it.
+# main is protected: direct pushes are rejected, so the change goes through a
+# pull request merged with a rebase. See the "Releasing" section of README.md.
+# This script does not commit, tag, push or upload anything.
 
 [CmdletBinding()]
 param(
@@ -85,7 +86,7 @@ try {
         Write-Host '[dry-run] would rewrite the Cargo.toml version line'
         Write-Host '[dry-run] would run cargo update --workspace to refresh Cargo.lock'
         Write-Host ''
-        Write-Host "next: commit, then push to main to release v$newVersion"
+        Write-Host "next: commit on a branch and open a PR against main to release v$newVersion"
         return
     }
 
@@ -103,8 +104,16 @@ try {
     git --no-pager diff --stat -- Cargo.toml Cargo.lock
     Write-Host ''
     Write-Host "bumped to $newVersion" -ForegroundColor Green
-    Write-Host "  next: git commit -am 'chore: bump version to $newVersion'"
-    Write-Host "  then: git push origin main   # publishes v$newVersion"
+
+    # main is protected, so printing a push instruction would print one that
+    # fails. Spell out the branch and PR instead; the merge is the release.
+    $branch = "release/v$newVersion"
+    Write-Host "  1. git switch -c $branch"
+    Write-Host "  2. git commit -am 'chore: bump version to $newVersion'"
+    Write-Host "  3. git push -u origin $branch"
+    Write-Host "  4. gh pr create --fill --base main   # then rebase-merge it"
+    Write-Host ''
+    Write-Host "merging the PR publishes v$newVersion" -ForegroundColor Green
 } finally {
     Pop-Location
 }
