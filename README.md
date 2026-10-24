@@ -524,8 +524,13 @@ gh pr create --fill --base main
 
 Merging that PR is the release. `main` only accepts **rebase merges** (merge
 commits and squash are disabled, and history must be linear), and the
-`fmt, clippy, test, deny` and `release archive` checks must pass first. No admin
-bypass is configured, so this applies to the maintainer too.
+`fmt, clippy, test, deny` and `release archive` checks must pass first.
+
+Administrators can bypass the pull-request rule and the status checks, so a
+direct push to `main` still works for the maintainer; expect the remote to answer
+with `Bypassed rule violations` as confirmation. Force-pushing and deleting
+`main` stay blocked even for admins. Prefer the PR: the bypass exists to unblock
+a stuck pipeline, not as the normal path.
 
 `bump-version.ps1` rewrites the `Cargo.toml` version line and runs
 `cargo update --workspace` so `Cargo.lock` matches; a lock file left behind by a
