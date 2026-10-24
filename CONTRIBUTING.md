@@ -10,10 +10,11 @@ winget install Rustlang.Rustup
 rustup default stable-x86_64-pc-windows-gnu
 winget install BrechtSanders.WinLibs.POSIX.UCRT
 cargo install --locked cargo-deny
+cargo install --locked git-cliff
 ```
 
 Then `./scripts/check.ps1` must pass. CI runs the same gates on
-`windows-latest`.
+`windows-latest`; see [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml).
 
 ## Ground rules
 
@@ -33,6 +34,9 @@ Then `./scripts/check.ps1` must pass. CI runs the same gates on
 [Conventional Commits](https://www.conventionalcommits.org/):
 `<type>[optional scope]: <description>`, lowercase, imperative, 72 characters at
 most.
+
+The type is load-bearing: release notes are grouped by it (see `cliff.toml`), so
+a `fix:` that lands under "Miscellaneous" misleads whoever reads the release.
 
 ## AI-assisted contributions
 

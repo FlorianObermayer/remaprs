@@ -1,0 +1,279 @@
+name: CI/CD
+
+# Three jobs, one path: `check` is every gate `scripts/check.ps1` runs,
+# `package` proves the release archive still builds on every change, and
+# `release` publishes it. Packaging is separate from publication so a pull
+# request can build the archive without a token that may write releases.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The crate links against MinGW and deny.toml only allows the GNU target, so
+  # build on the same toolchain locally and in CI instead of rustup's MSVC
+  # default for this runner.
+  RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-gnu
+
+# Whether a push publishes or only refreshes the nightly is decided by asking
+# whether that version already has a release, so two runs for the same ref must
+# not overlap: the loser would mistake a stable release for an already-released
+# version. Pull requests have nothing to publish and may be cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: fmt, clippy, test, deny
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The windows-* crates need dlltool at build time; rustup's bundled copy
+      # fails on some installs, which is why the README points at WinLibs too.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW-w64 on PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\ucrt64\bin'
+
+      - name: Install toolchain
+        shell: pwsh
+        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        shell: pwsh
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        shell: pwsh
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        shell: pwsh
+        run: cargo test --locked
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # tests/tooling.rs runs the real release scripts, which call git-cliff.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: cargo deny
+        shell: pwsh
+        run: cargo deny check
+
+  package:
+    name: release archive
+    needs: check
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_version: ${{ steps.version.outputs.build_version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Put MinGW-w64 on PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\msys64\ucrt64\bin'
+
+      - name: Install toolchain
+        shell: pwsh
+        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cargo.toml is the single source of truth for the version: scripts/release.ps1
+      # names the archive after it and the release tag is derived from it, so the
+      # two cannot disagree.
+      - name: Read the version from Cargo.toml
+        id: version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq 'remaprs').version
+          if (-not $version) {
+            Write-Error 'cargo metadata did not report a remaprs version'
+            exit 1
+          }
+          "version=$version" | Add-Content -Path $env:GITHUB_OUTPUT
+          "build_version=$version-${{ github.run_number }}" | Add-Content -Path $env:GITHUB_OUTPUT
+
+      # Packaging is what a release does, so exercise it on every change rather
+      # than discovering a broken script at release time.
+      - name: Build archive
+        shell: pwsh
+        run: ./scripts/release.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: remaprs-windows-x86_64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: package
+    # Only master publishes: a fork or pull request gets a read-only token, and
+    # a manual run is the sanctioned way to republish without a new push.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      # git-cliff needs the full history to group commits, and the tag check
+      # below needs the tags: with fetch-depth 0 actions/checkout fetches both.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: remaprs-windows-x86_64
+          path: dist
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      # The version bump is the release trigger, so "has this version been
+      # released?" is the only question this job needs to answer. It is asked
+      # of the release rather than the tag: a run that died between creating the
+      # tag and uploading the assets leaves a tag behind, and treating that as
+      # "released" would demote the retry to a nightly build.
+      #
+      # A missing release exits non-zero, so the status is read rather than the
+      # command being allowed to fail the step.
+      - name: Inspect existing releases
+        id: releases
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "v$env:VERSION" --json tagName 2>$null | Out-Null
+          $isNew = $LASTEXITCODE -ne 0
+
+          gh release view nightly --json tagName 2>$null | Out-Null
+          $hasNightly = $LASTEXITCODE -eq 0
+
+          "is_new_version=$($isNew.ToString().ToLowerInvariant())" | Add-Content -Path $env:GITHUB_OUTPUT
+          "has_nightly=$($hasNightly.ToString().ToLowerInvariant())" | Add-Content -Path $env:GITHUB_OUTPUT
+
+          if ($isNew) {
+            Write-Host "v$env:VERSION has no release yet; publishing it as stable"
+          } else {
+            Write-Host "v$env:VERSION is already released; refreshing the nightly instead"
+          }
+
+      # The download section is written by the script rather than in the
+      # changelog template: git-cliff only knows commits, and the file names
+      # come from scripts/release.ps1. Values arrive as environment variables so
+      # nothing from a workflow expression is interpolated into the script text.
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          IS_NEW_VERSION: ${{ steps.releases.outputs.is_new_version }}
+          VERSION: ${{ needs.package.outputs.version }}
+          BUILD_VERSION: ${{ needs.package.outputs.build_version }}
+          COMMIT: ${{ github.sha }}
+          BODY_PATH: ${{ runner.temp }}/release-body.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $kind = if ($env:IS_NEW_VERSION -eq 'true') { 'stable' } else { 'nightly' }
+          ./scripts/release-notes.ps1 `
+            -Version $env:VERSION `
+            -Build $env:BUILD_VERSION `
+            -Commit $env:COMMIT `
+            -Kind $kind `
+            -OutputPath $env:BODY_PATH
+
+      # A new version retires the nightly: keeping it around would leave a
+      # pre-release whose "changes since" link points at its own base version.
+      - name: Publish stable release
+        if: steps.releases.outputs.is_new_version == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.package.outputs.version }}
+          name: remaprs v${{ needs.package.outputs.version }}
+          body_path: ${{ runner.temp }}/release-body.md
+          prerelease: false
+          make_latest: true
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.zip
+            dist/*.zip.sha256
+
+      # `--cleanup-tag` also removes the tag, so a later run cannot mistake the
+      # nightly for a version tag.
+      - name: Delete the superseded nightly release
+        if: steps.releases.outputs.is_new_version == 'true' && steps.releases.outputs.has_nightly == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'removed the nightly release and its tag'
+
+      # Subsequent pushes under the same version: move the rolling tag, then
+      # replace the release so it points at this build.
+      - name: Move the nightly tag to this commit
+        if: steps.releases.outputs.is_new_version != 'true'
+        shell: pwsh
+        run: |
+          git tag -f nightly
+          git push --force origin refs/tags/nightly
+
+      # Without --cleanup-tag: the tag was just moved and the step below
+      # reuses it.
+      - name: Delete the previous nightly release
+        if: steps.releases.outputs.is_new_version != 'true' && steps.releases.outputs.has_nightly == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'replaced the previous nightly release'
+
+      - name: Publish nightly pre-release
+        if: steps.releases.outputs.is_new_version != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: Nightly (${{ needs.package.outputs.build_version }})
+          body_path: ${{ runner.temp }}/release-body.md
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.zip
+            dist/*.zip.sha256

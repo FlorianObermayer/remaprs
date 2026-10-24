@@ -477,7 +477,14 @@ a bug.
 ./scripts/check.ps1          # format, lint, test, dependency policy, release build
 ./scripts/check.ps1 -Fast    # same, without the release build
 ./scripts/release.ps1        # build the release zip into dist\
+./scripts/bump-version.ps1   # bump the crate version (patch/minor/major)
+./scripts/release-notes.ps1  # render release notes (needs git-cliff)
 ```
+
+`tests/tooling.rs` runs the release scripts against a throwaway git repository,
+so a broken changelog template or version bump fails `cargo test` rather than a
+release. It needs `git-cliff` on `PATH` (`cargo install --locked git-cliff`); CI
+installs it, and `scripts/check.ps1` warns when it is missing.
 
 Or run the individual steps:
 
@@ -489,7 +496,7 @@ cargo deny check
 ```
 
 CI runs the same four gates on every push and pull request, plus the release zip
-build. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+build. See [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
 
 Contributions: [CONTRIBUTING.md](CONTRIBUTING.md) covers the ground rules and how
 AI assistance is disclosed.
@@ -498,11 +505,49 @@ AI assistance is disclosed.
 
 `scripts/release.ps1` stages `remaprs.exe`, the README, the license and the
 example config into `dist\remaprs-<version>-x86_64-pc-windows-gnu.zip` and prints
-its SHA256. The same layout is what the tag workflow attaches to a GitHub
-release, so a local zip can be uploaded by hand if CI is unavailable.
+its SHA256. The same layout is what the workflow attaches to a GitHub release, so
+a local zip can be uploaded by hand if CI is unavailable.
 
-The version comes from `Cargo.toml`; the script does not edit it. To cut a
-release, bump the version, tag `v<version>`, and push the tag.
+The version comes from `Cargo.toml`; no script edits it. **Bumping it is the
+release trigger**: the workflow asks whether a release for `v<version>` exists
+yet, and a version that has never been released gets a stable release. To cut
+one:
+
+```powershell
+./scripts/bump-version.ps1 minor   # or patch / major, or -DryRun to preview
+git commit -am "chore: bump version to 0.2.0"
+git push origin master             # publishes v0.2.0
+```
+
+The bump script rewrites the `Cargo.toml` version line and runs
+`cargo update --workspace` so `Cargo.lock` matches; a lock file left behind by a
+manual edit makes `--locked` builds fail. It refuses to run on a working tree
+with uncommitted changes, and it stops there: committing is a deliberate step,
+and the tag itself is created by the release job. Pushing a tag by hand does
+nothing on its own.
+
+Every later push to `master` under an already-released version instead refreshes
+a rolling `nightly` pre-release, which is deleted when the next version ships.
+Neither path publishes a zip without the checks having passed on that commit.
+
+Release notes are generated from the commit history by
+[git-cliff](https://github.com/orhun/git-cliff) using [`cliff.toml`](cliff.toml),
+which is why commit types are not cosmetic: they choose the section a change
+lands in. [`scripts/release-notes.ps1`](scripts/release-notes.ps1) renders the
+body and is what the workflow calls, so the notes can be previewed locally:
+
+```powershell
+cargo install --locked git-cliff
+./scripts/release-notes.ps1 -Version 0.1.0 -Build 0.1.0-42 -Kind stable
+```
+
+Pass `-Kind nightly` to preview the nightly body. Without `GITHUB_TOKEN` the
+script passes `--offline` to git-cliff, so it works on a private checkout but
+omits the `by @user` attribution that the API would add.
+
+The workflow runs on `windows-latest` with the same MinGW toolchain the checks use,
+so a release build reproduces the documented layout and toolchain rather than a
+different configuration.
 
 ### Linting
 

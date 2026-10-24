@@ -1,0 +1,62 @@
+# Release notes are generated from the commit history by git-cliff, which the
+# CI/CD workflow runs. Commit types are not cosmetic here: they choose the
+# section a change lands in. See CONTRIBUTING.md.
+[changelog]
+header = """# Changelog\n
+All notable changes to this project will be documented in this file.\n"""
+body = """
+{%- macro remote_url() -%}
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
+{%- endmacro -%}
+
+{% if version -%}
+  ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+  ## [Unreleased]
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+  ### {{ group | striptags | trim | upper_first }}
+  {% for commit in commits %}
+    - {% if commit.scope %}*({{ commit.scope }})* {% endif %}{{ commit.message | upper_first }} \
+      ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))\
+      {%- if commit.remote.username %} by @{{ commit.remote.username }}{%- endif %}
+  {%- endfor %}
+{% endfor %}
+{%- set release_version = get_env(name="RELEASE_VERSION", default="") -%}
+{%- if previous.version and version %}\n
+**Full Changelog**: [{{ previous.version }}...{{ version }}]({{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }})\n
+{%- elif previous.version and release_version %}\n
+**Full Changelog**: [{{ previous.version }}...{{ release_version }}]({{ self::remote_url() }}/compare/{{ previous.version }}...{{ release_version }})\n
+{%- endif %}\n
+"""
+footer = ""
+trim = true
+
+[remote.github]
+owner = "FlorianObermayer"
+repo = "remaprs"
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^refactor", group = "<!-- 2 -->Refactor" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^doc|^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^style", group = "<!-- 5 -->Styling" },
+  { message = "^test", group = "<!-- 6 -->Testing" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore|^ci|^build", group = "<!-- 7 -->Miscellaneous" },
+  { body = ".*security", group = "<!-- 8 -->Security" },
+  { message = ".*", group = "<!-- 9 -->Other" },
+]
+protect_breaking_commits = false
+filter_commits = false
+# The rolling `nightly` tag must not be mistaken for the last released version.
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "newest"

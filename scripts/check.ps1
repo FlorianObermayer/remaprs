@@ -38,6 +38,13 @@ try {
     # lints, configured in Cargo.toml and clippy.toml.
     Invoke-Step 'cargo clippy' { cargo clippy --all-targets -- -D warnings }
 
+    # The tooling tests drive the real release scripts, which call git-cliff.
+    # Skipping them silently would hide a broken changelog template, so say why.
+    if (-not (Get-Command git-cliff -ErrorAction SilentlyContinue)) {
+        Write-Host ""
+        Write-Host "warning: git-cliff is not installed; tests/tooling.rs will fail (cargo install --locked git-cliff)" -ForegroundColor Yellow
+    }
+
     Invoke-Step 'cargo test' { cargo test }
 
     # Dependency policy: advisories, licenses, banned crates, sources.

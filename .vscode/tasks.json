@@ -47,6 +47,89 @@
       }
     },
     {
+      "label": "check (fast)",
+      "detail": "Same gates as CI without the release build; use this while editing.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/check.ps1", "-Fast"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "bump version (patch)",
+      "detail": "0.1.0 -> 0.1.1. Rewrites Cargo.toml and Cargo.lock, then stops: committing and pushing to master is what publishes the release.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/bump-version.ps1", "patch"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "bump version (minor)",
+      "detail": "0.1.0 -> 0.2.0. See \"bump version (patch)\" for what happens next.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/bump-version.ps1", "minor"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "bump version (dry run)",
+      "detail": "Prints the version change without writing Cargo.toml or Cargo.lock.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/bump-version.ps1", "-DryRun"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "build release zip",
+      "detail": "Packages target\\release\\remaprs.exe and the docs into dist\\, printing the SHA256.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/release.ps1"],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "preview release notes",
+      "detail": "Renders the notes git-cliff would publish, into release-body.md. Needs git-cliff on PATH.",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/release-notes.ps1",
+        "-Version",
+        "0.1.0",
+        "-Build",
+        "0.1.0-local",
+        "-Kind",
+        "stable",
+        "-OutputPath",
+        "${workspaceFolder}/release-body.md"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "reveal": "always"
+      }
+    },
+    {
       "label": "start",
       "type": "shell",
       "command": "cargo",

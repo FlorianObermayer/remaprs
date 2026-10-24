@@ -1,3 +1,5 @@
 /target
 /dist
 *.pdb
+# Rendered locally by scripts/release-notes.ps1 and the "preview release notes" task.
+/release-body.md
