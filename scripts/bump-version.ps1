@@ -110,13 +110,16 @@ try {
     # Printed unnumbered and unindented on purpose: this block is meant to be
     # selected and pasted into a shell, which a numbered or indented checklist
     # would break. Instructions stay outside the block for the same reason.
+    #
+    # The merge is deliberately absent: bumping the version is this script's job,
+    # and merging the pull request is a separate decision made by hand.
     $branch = "release/v$newVersion"
     Write-Host "git switch -c $branch"
     Write-Host "git commit -am 'chore: bump version to $newVersion'"
     Write-Host "git push -u origin $branch"
     Write-Host 'gh pr create --fill --base main'
     Write-Host ''
-    Write-Host "Rebase-merge the PR once the checks pass: that publishes v$newVersion" -ForegroundColor Green
+    Write-Host "Merging that pull request publishes v$newVersion" -ForegroundColor Green
 } finally {
     Pop-Location
 }
