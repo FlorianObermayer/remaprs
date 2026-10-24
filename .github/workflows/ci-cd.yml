@@ -145,7 +145,11 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions:
+      # Publishing needs write; git-cliff also reads pull requests for the
+      # "by @author" attribution, which is a different permission and would 403
+      # without it (the job then panics inside git-cliff rather than degrading).
       contents: write
+      pull-requests: read
     steps:
       # git-cliff needs the full history to group commits, and the tag check
       # below needs the tags: with fetch-depth 0 actions/checkout fetches both.
