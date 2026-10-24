@@ -59,7 +59,7 @@
     },
     {
       "label": "bump version (patch)",
-      "detail": "0.1.0 -> 0.1.1. Rewrites Cargo.toml and Cargo.lock, then stops: committing and pushing to master is what publishes the release.",
+      "detail": "0.1.0 -> 0.1.1. Rewrites Cargo.toml and Cargo.lock, then stops: committing and pushing to main is what publishes the release.",
       "type": "shell",
       "command": "pwsh",
       "args": ["-NoProfile", "-File", "${workspaceFolder}/scripts/bump-version.ps1", "patch"],

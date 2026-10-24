@@ -8,7 +8,7 @@
 #   ./scripts/bump-version.ps1 major    # 0.1.0 -> 1.0.0
 #   ./scripts/bump-version.ps1 -DryRun  # print the change without writing it
 #
-# Pushing the bump commit to master is what publishes a release; see the
+# Pushing the bump commit to main is what publishes a release: see the
 # "Releasing" section of README.md. This script does not commit, tag, push or
 # upload anything.
 
@@ -85,7 +85,7 @@ try {
         Write-Host '[dry-run] would rewrite the Cargo.toml version line'
         Write-Host '[dry-run] would run cargo update --workspace to refresh Cargo.lock'
         Write-Host ''
-        Write-Host "next: commit, then push to master to release v$newVersion"
+        Write-Host "next: commit, then push to main to release v$newVersion"
         return
     }
 
@@ -104,7 +104,7 @@ try {
     Write-Host ''
     Write-Host "bumped to $newVersion" -ForegroundColor Green
     Write-Host "  next: git commit -am 'chore: bump version to $newVersion'"
-    Write-Host "  then: git push origin master   # publishes v$newVersion"
+    Write-Host "  then: git push origin main   # publishes v$newVersion"
 } finally {
     Pop-Location
 }

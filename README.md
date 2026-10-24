@@ -516,7 +516,7 @@ one:
 ```powershell
 ./scripts/bump-version.ps1 minor   # or patch / major, or -DryRun to preview
 git commit -am "chore: bump version to 0.2.0"
-git push origin master             # publishes v0.2.0
+git push origin main                # publishes v0.2.0
 ```
 
 The bump script rewrites the `Cargo.toml` version line and runs
@@ -526,7 +526,7 @@ with uncommitted changes, and it stops there: committing is a deliberate step,
 and the tag itself is created by the release job. Pushing a tag by hand does
 nothing on its own.
 
-Every later push to `master` under an already-released version instead refreshes
+Every later push to `main` under an already-released version instead refreshes
 a rolling `nightly` pre-release, which is deleted when the next version ships.
 Neither path publishes a zip without the checks having passed on that commit.
 

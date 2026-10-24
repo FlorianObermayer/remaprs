@@ -64,7 +64,7 @@ try {
         $changelogArgs = @('--unreleased', '--tag', "v$Version", '--strip', 'header')
     } else {
         $lines = @(
-            'Automated build from `master`; **not a stable release**.'
+            'Automated build from `main`; **not a stable release**.'
             ''
             "Download ``$archive`` and verify it against the attached ``.zip.sha256``."
             'The archive holds the executable, the README, the license and one commented example'

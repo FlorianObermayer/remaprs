@@ -7,7 +7,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -139,9 +139,9 @@ jobs:
   release:
     name: publish release
     needs: package
-    # Only master publishes: a fork or pull request gets a read-only token, and
+    # Only main publishes: a fork or pull request gets a read-only token, and
     # a manual run is the sanctioned way to republish without a new push.
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -167,8 +167,10 @@ jobs:
       # tag and uploading the assets leaves a tag behind, and treating that as
       # "released" would demote the retry to a nightly build.
       #
-      # A missing release exits non-zero, so the status is read rather than the
-      # command being allowed to fail the step.
+      # "Not found" is the expected answer on a first release, and it exits 1.
+      # Reading $LASTEXITCODE is not enough on its own: the runner appends
+      # `exit $LASTEXITCODE` to every pwsh step, so an expected miss would still
+      # fail the job. `exit 0` at the end is what makes the step succeed.
       - name: Inspect existing releases
         id: releases
         shell: pwsh
@@ -190,6 +192,8 @@ jobs:
           } else {
             Write-Host "v$env:VERSION is already released; refreshing the nightly instead"
           }
+
+          exit 0
 
       # The download section is written by the script rather than in the
       # changelog template: git-cliff only knows commits, and the file names
