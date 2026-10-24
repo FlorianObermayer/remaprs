@@ -104,16 +104,19 @@ try {
     git --no-pager diff --stat -- Cargo.toml Cargo.lock
     Write-Host ''
     Write-Host "bumped to $newVersion" -ForegroundColor Green
-
-    # main is protected, so printing a push instruction would print one that
-    # fails. Spell out the branch and PR instead; the merge is the release.
-    $branch = "release/v$newVersion"
-    Write-Host "  1. git switch -c $branch"
-    Write-Host "  2. git commit -am 'chore: bump version to $newVersion'"
-    Write-Host "  3. git push -u origin $branch"
-    Write-Host "  4. gh pr create --fill --base main   # then rebase-merge it"
     Write-Host ''
-    Write-Host "merging the PR publishes v$newVersion" -ForegroundColor Green
+    Write-Host 'Open the release pull request with these:' -ForegroundColor Cyan
+
+    # Printed unnumbered and unindented on purpose: this block is meant to be
+    # selected and pasted into a shell, which a numbered or indented checklist
+    # would break. Instructions stay outside the block for the same reason.
+    $branch = "release/v$newVersion"
+    Write-Host "git switch -c $branch"
+    Write-Host "git commit -am 'chore: bump version to $newVersion'"
+    Write-Host "git push -u origin $branch"
+    Write-Host 'gh pr create --fill --base main'
+    Write-Host ''
+    Write-Host "Rebase-merge the PR once the checks pass: that publishes v$newVersion" -ForegroundColor Green
 } finally {
     Pop-Location
 }
