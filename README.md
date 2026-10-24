@@ -533,11 +533,27 @@ Merging that PR is the release. `main` only accepts **rebase merges** (merge
 commits and squash are disabled, and history must be linear), and the
 `fmt, clippy, test, deny` and `release archive` checks must pass first.
 
-Administrators can bypass the pull-request rule and the status checks, so a
-direct push to `main` still works for the maintainer; expect the remote to answer
-with `Bypassed rule violations` as confirmation. Force-pushing and deleting
-`main` stay blocked even for admins. Prefer the PR: the bypass exists to unblock
-a stuck pipeline, not as the normal path.
+The branch also requires one approving review, and this repository has a single
+collaborator, so a maintainer cannot approve their own pull request; merge with
+the administrator override once the checks are green:
+
+```powershell
+gh pr merge --rebase --admin --delete-branch
+```
+
+That override is the normal path here rather than an emergency exit, so two
+consequences are worth knowing:
+
+* `--admin` skips the review requirement *and* the status checks. Run it only
+  after the checks have gone green: the workflow still refuses to publish from a
+  commit whose gates failed, but a merge that skipped them leaves `main` broken.
+* The remote reports what was overridden (`Bypassed rule violations`), so the
+  bypass is visible after the fact.
+
+Direct pushes to `main` work for administrators for the same reason; the remote
+answers with `Bypassed rule violations`. Force-pushing and deleting `main` stay
+blocked even for admins. Prefer the pull request: it keeps a reviewable record
+of what shipped, which a direct push does not.
 
 `bump-version.ps1` rewrites the `Cargo.toml` version line and runs
 `cargo update --workspace` so `Cargo.lock` matches; a lock file left behind by a

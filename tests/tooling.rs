@@ -425,6 +425,14 @@ fn bump_script_prints_commands_that_paste_verbatim() {
         "release commands must be pasteable as printed:\n{stdout}"
     );
 
+    // Merging is out of scope for a script that only bumps the version: it is a
+    // separate decision, and `--admin` would skip the checks if it were pasted
+    // along with the commands above.
+    assert!(
+        !stdout.contains("gh pr merge"),
+        "the bump script must not merge the pull request:\n{stdout}"
+    );
+
     // No leftovers of an indented or numbered variant.
     assert!(
         !stdout
