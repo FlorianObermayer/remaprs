@@ -13,15 +13,19 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use remaprs::clock::Clock;
 use remaprs::config::JitterRange;
+use remaprs::engine::StickTarget;
 use remaprs::engine::{Action, Binding, Engine, Output, Step};
-use remaprs::gamepad::{GamepadSource, PadState, ScriptedSource, bits};
-use remaprs::input::NoKeyboard;
+use remaprs::gamepad::{GamepadSource, PadState, ScriptedSource, StickState, bits};
+use remaprs::input::{InputThresholds, NoKeyboard};
+use remaprs::keys::Stick;
 use remaprs::keys::{Key, KeyboardKey, Trigger};
 use remaprs::output::KeyEmitter;
 use remaprs::runner::Runner;
 use remaprs::safety::AllowAll;
 
 const THRESHOLD: u8 = 30;
+
+const THRESHOLDS: InputThresholds = InputThresholds::with_default_deadzone(THRESHOLD);
 
 fn spacebar() -> Key {
     Key::Keyboard(KeyboardKey::new(0x20, false))
@@ -93,6 +97,19 @@ impl KeyEmitter for FlakyEmitter {
     fn release(&mut self, key: Key) -> Result<()> {
         self.record(Action::Release(key))
     }
+
+    // Overridden so motion is recorded too; the trait's default is a no-op for
+    // emitters that only care about keys.
+    fn move_mouse(&mut self, dx: i32, dy: i32) -> Result<()> {
+        self.record(Action::MouseMove { dx, dy })
+    }
+
+    fn scroll(&mut self, horizontal: i32, vertical: i32) -> Result<()> {
+        self.record(Action::Scroll {
+            horizontal,
+            vertical,
+        })
+    }
 }
 
 /// A pad source whose first read fails, then reports `frames`.
@@ -125,13 +142,21 @@ fn engine() -> Engine {
                 initial_delay: JitterRange::fixed(0),
             }],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(remaprs::jitter::SeededJitter::new(1)),
     )
 }
 
 fn held() -> PadState {
     PadState::button(bits::A)
+}
+
+/// A pad with the right stick pushed fully right.
+fn pushed() -> PadState {
+    PadState {
+        right_stick: StickState::new(i16::MAX, 0),
+        ..PadState::default()
+    }
 }
 
 #[test]
@@ -275,5 +300,116 @@ fn an_unsupported_binding_still_releases_on_exit() {
     assert!(
         events.contains(&Action::Release(spacebar())),
         "the exit path must release what it pressed: {events:?}"
+    );
+}
+
+#[test]
+fn a_pushed_stick_moves_the_pointer_through_the_loop() {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let clock = TestClock::new(Arc::clone(&shutdown), 200);
+    let emitter = FlakyEmitter::new(0);
+    let events = Rc::clone(&emitter.events);
+
+    let mut runner = Runner {
+        engine: Engine::new(
+            vec![Binding {
+                from: Trigger::StickAxis(Stick::Right),
+                outputs: vec![Output::Stick(remaprs::engine::StickOutput {
+                    target: StickTarget::Mouse,
+                    axes: remaprs::engine::StickAxes::Both,
+                    sensitivity: 1_000,
+                    invert_x: false,
+                    invert_y: false,
+                    initial_delay: JitterRange::fixed(0),
+                })],
+            }],
+            THRESHOLDS,
+            Box::new(remaprs::jitter::SeededJitter::new(1)),
+        ),
+        source: Box::new(ScriptedSource::new([Some(PadState {
+            right_stick: StickState::new(i16::MAX, 0),
+            ..PadState::default()
+        })])),
+        keyboard: Box::new(NoKeyboard),
+        emitter: Box::new(emitter),
+        guard: Box::new(AllowAll),
+        poll_interval_ms: 4,
+        release_on_exit: true,
+    };
+    let toggle = AtomicBool::new(false);
+
+    let result = runner.run(&clock, &shutdown, &toggle);
+    assert!(result.is_ok(), "{result:?}");
+
+    let events = events.borrow();
+    let travelled: i32 = events
+        .iter()
+        .filter_map(|action| match action {
+            Action::MouseMove { dx, .. } => Some(*dx),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        travelled > 0,
+        "the stick produced no pointer motion: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|action| !matches!(action, Action::Press(_))),
+        "a stick output must not press keys: {events:?}"
+    );
+}
+
+#[test]
+fn motion_is_dropped_instead_of_queued_when_emission_is_blocked() {
+    // A relative move replayed after an outage would jerk the pointer by the
+    // whole distance it should have covered while the desktop was blocked.
+    //
+    // The stick is pushed for two polls and then released. The only motion this
+    // produces is refused, and it happens *before* the release. A queued delta
+    // would be flushed on the next iteration, after the stick had already been
+    // let go, which is exactly what must not happen.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let clock = TestClock::new(Arc::clone(&shutdown), 120);
+    let emitter = FlakyEmitter::new(1);
+    let events = Rc::clone(&emitter.events);
+
+    let mut runner = Runner {
+        engine: Engine::new(
+            vec![Binding {
+                from: Trigger::StickAxis(Stick::Right),
+                outputs: vec![Output::Stick(remaprs::engine::StickOutput {
+                    target: StickTarget::Mouse,
+                    axes: remaprs::engine::StickAxes::Both,
+                    sensitivity: 1_000,
+                    invert_x: false,
+                    invert_y: false,
+                    initial_delay: JitterRange::fixed(0),
+                })],
+            }],
+            THRESHOLDS,
+            Box::new(remaprs::jitter::SeededJitter::new(1)),
+        ),
+        source: Box::new(ScriptedSource::new([
+            Some(pushed()),
+            Some(pushed()),
+            Some(PadState::default()),
+        ])),
+        keyboard: Box::new(NoKeyboard),
+        emitter: Box::new(emitter),
+        guard: Box::new(AllowAll),
+        poll_interval_ms: 4,
+        release_on_exit: true,
+    };
+    let toggle = AtomicBool::new(false);
+
+    let result = runner.run(&clock, &shutdown, &toggle);
+    assert!(result.is_ok(), "{result:?}");
+
+    assert!(
+        events.borrow().is_empty(),
+        "the refused frame's motion was replayed after the release: {:?}",
+        events.borrow()
     );
 }

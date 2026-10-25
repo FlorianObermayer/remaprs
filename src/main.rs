@@ -21,11 +21,11 @@ use remaprs::cli::{
     resolve_config, write_starter,
 };
 use remaprs::clock::SystemClock;
-use remaprs::config::{Config, OutputSpec, SafetyConfig};
-use remaprs::engine::{Binding, Engine, Output, Step};
+use remaprs::config::{Config, OutputSpec, SafetyConfig, StickAxisSpec, StickTargetSpec};
+use remaprs::engine::{Binding, Engine, Output, Step, StickAxes, StickOutput, StickTarget};
 use remaprs::gamepad::GamepadSource;
 use remaprs::hotkey;
-use remaprs::input::{KeyboardSource, NoKeyboard};
+use remaprs::input::{InputThresholds, KeyboardSource, NoKeyboard};
 use remaprs::jitter::RandomJitter;
 use remaprs::keys::{Key, KeyboardKey, Trigger};
 use remaprs::logging::{self, LogSink};
@@ -275,7 +275,10 @@ fn start(dry_run: bool, config: &Config) -> Result<()> {
 
     let engine = Engine::new(
         bindings,
-        config.device.trigger_threshold,
+        InputThresholds::new(
+            config.device.trigger_threshold,
+            config.device.stick_deadzone,
+        ),
         Box::new(RandomJitter::new()),
     );
 
@@ -333,8 +336,11 @@ fn log_plan(dry_run: bool, config: &Config) {
         info!("dry run: no input will be sent");
     }
     info!(
-        "controller slot {}, poll every {} ms, trigger threshold {}",
-        config.device.index, config.device.poll_interval_ms, config.device.trigger_threshold
+        "controller slot {}, poll every {} ms, trigger threshold {}, stick deadzone {}",
+        config.device.index,
+        config.device.poll_interval_ms,
+        config.device.trigger_threshold,
+        config.device.stick_deadzone
     );
     for binding in &config.bindings {
         for output in &binding.outputs {
@@ -397,6 +403,28 @@ fn to_output(output: &OutputSpec) -> Output {
             repeat: *repeat,
             initial_delay: *initial_delay_ms,
         },
+        OutputSpec::Stick {
+            target,
+            axes,
+            sensitivity,
+            invert_x,
+            invert_y,
+            initial_delay_ms,
+        } => Output::Stick(StickOutput {
+            target: match target {
+                StickTargetSpec::Mouse => StickTarget::Mouse,
+                StickTargetSpec::Scroll => StickTarget::Scroll,
+            },
+            axes: match axes {
+                StickAxisSpec::Both => StickAxes::Both,
+                StickAxisSpec::Horizontal => StickAxes::Horizontal,
+                StickAxisSpec::Vertical => StickAxes::Vertical,
+            },
+            sensitivity: *sensitivity,
+            invert_x: *invert_x,
+            invert_y: *invert_y,
+            initial_delay: *initial_delay_ms,
+        }),
     }
 }
 
@@ -431,6 +459,30 @@ fn describe_output(from: Trigger, output: &OutputSpec) {
             info!(
                 "{from} -> sequence [{}] starting after {delay} ms{looped}",
                 keys.join(" -> ")
+            );
+        }
+        OutputSpec::Stick {
+            target,
+            axes,
+            sensitivity,
+            invert_x,
+            invert_y,
+            ..
+        } => {
+            let unit = match target {
+                StickTargetSpec::Mouse => "px/s",
+                StickTargetSpec::Scroll => "notches/s",
+            };
+            let flips = match (invert_x, invert_y) {
+                (false, false) => String::new(),
+                (true, false) => ", x inverted".to_owned(),
+                (false, true) => ", y inverted".to_owned(),
+                (true, true) => ", both axes inverted".to_owned(),
+            };
+            info!(
+                "{from} -> {} {sensitivity} {unit} on the {} axis{flips}, starting after {delay} ms",
+                target.name(),
+                axes.name()
             );
         }
     }

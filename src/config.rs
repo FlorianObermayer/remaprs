@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-use crate::keys::{Button, Key, KeyboardKey, Trigger};
+use crate::keys::{Key, KeyboardKey, Trigger};
 
 /// Schema version understood by this build.
 pub const CURRENT_VERSION: u32 = 1;
@@ -21,6 +21,17 @@ pub const DEFAULT_INITIAL_DELAY: JitterRange = JitterRange::fixed(0);
 pub const DEFAULT_POLL_INTERVAL_MS: u64 = 4;
 /// Default analog trigger threshold; a trigger counts as pressed at or above it.
 pub const DEFAULT_TRIGGER_THRESHOLD: u8 = 30;
+/// Default stick deadzone; `XInput`'s own default for the left stick.
+pub const DEFAULT_STICK_DEADZONE: u16 = 7_849;
+/// Default full-scale rate of a stick output, in pixels or notches per second.
+pub const DEFAULT_STICK_SENSITIVITY: u32 = 800;
+/// Upper bound for `sensitivity`, so a typo cannot fling the pointer.
+pub const MAX_STICK_SENSITIVITY: u32 = 20_000;
+/// Upper bound for `device.stick_deadzone`.
+///
+/// It must stay below full scale, otherwise no push could ever leave the
+/// deadzone and every stick binding would be silently dead.
+pub const MAX_STICK_DEADZONE: u16 = 30_000;
 /// Default suspend/resume hotkey (`F12`).
 pub const DEFAULT_TOGGLE_KEY: Key = Key::Keyboard(KeyboardKey::new(0x7B, false));
 
@@ -100,6 +111,8 @@ pub enum OutputMode {
     /// Press the key once and keep it down until the trigger is released, or
     /// for as long as `hold_ms` says.
     Hold,
+    /// Turn stick deflection into pointer motion or wheel scrolling.
+    Stick,
 }
 
 impl OutputMode {
@@ -109,6 +122,54 @@ impl OutputMode {
         match self {
             Self::Sequence => "sequence",
             Self::Hold => "hold",
+            Self::Stick => "stick",
+        }
+    }
+}
+
+/// What a `stick` output drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StickTargetSpec {
+    /// Move the pointer.
+    #[default]
+    Mouse,
+    /// Turn the wheel.
+    Scroll,
+}
+
+impl StickTargetSpec {
+    /// Lower-case name used in diagnostics and in the YAML file.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Mouse => "mouse",
+            Self::Scroll => "scroll",
+        }
+    }
+}
+
+/// Which axes of the stick a `stick` output reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StickAxisSpec {
+    /// Both axes.
+    #[default]
+    Both,
+    /// Horizontal only.
+    Horizontal,
+    /// Vertical only.
+    Vertical,
+}
+
+impl StickAxisSpec {
+    /// Lower-case name used in diagnostics and in the YAML file.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
         }
     }
 }
@@ -158,6 +219,21 @@ pub enum OutputSpec {
         /// Time from the trigger going down to the first press.
         initial_delay_ms: JitterRange,
     },
+    /// Turn stick deflection into pointer motion or wheel scrolling.
+    Stick {
+        /// What the deflection is applied to.
+        target: StickTargetSpec,
+        /// Which axes are read.
+        axes: StickAxisSpec,
+        /// Rate at full deflection, in pixels or notches per second.
+        sensitivity: u32,
+        /// Flip the horizontal direction.
+        invert_x: bool,
+        /// Flip the vertical direction.
+        invert_y: bool,
+        /// Time from the stick leaving the deadzone to the first motion.
+        initial_delay_ms: JitterRange,
+    },
 }
 
 impl OutputSpec {
@@ -189,6 +265,7 @@ impl OutputSpec {
         match self {
             Self::Hold { .. } => OutputMode::Hold,
             Self::Sequence { .. } => OutputMode::Sequence,
+            Self::Stick { .. } => OutputMode::Stick,
         }
     }
 
@@ -201,6 +278,9 @@ impl OutputSpec {
             }
             | Self::Sequence {
                 initial_delay_ms, ..
+            }
+            | Self::Stick {
+                initial_delay_ms, ..
             } => *initial_delay_ms,
         }
     }
@@ -208,7 +288,8 @@ impl OutputSpec {
     /// Every key this output can emit, in the order it first appears.
     ///
     /// A sequence may repeat a key on purpose, so duplicates inside one output
-    /// are collapsed rather than reported.
+    /// are collapsed rather than reported. A stick output emits motion instead
+    /// of keys, so it contributes none.
     #[must_use]
     pub fn keys(&self) -> Vec<Key> {
         let mut keys = Vec::new();
@@ -221,6 +302,7 @@ impl OutputSpec {
                     }
                 }
             }
+            Self::Stick { .. } => {}
         }
         keys
     }
@@ -318,6 +400,16 @@ struct OutputRepr {
     hold_ms: Option<JitterRange>,
     initial_delay_ms: Option<JitterRange>,
     repeat: Option<bool>,
+    /// `stick` outputs only: what the deflection drives.
+    target: Option<StickTargetSpec>,
+    /// `stick` outputs only: which axes are read.
+    axis: Option<StickAxisSpec>,
+    /// `stick` outputs only: rate at full deflection.
+    sensitivity: Option<u32>,
+    /// `stick` outputs only: flip the horizontal axis.
+    invert_x: Option<bool>,
+    /// `stick` outputs only: flip the vertical axis.
+    invert_y: Option<bool>,
     #[serde(default)]
     steps: Vec<StepRepr>,
 }
@@ -339,6 +431,11 @@ struct Defaults {
     hold_ms: Option<JitterRange>,
     initial_delay_ms: Option<JitterRange>,
     repeat: Option<bool>,
+    target: Option<StickTargetSpec>,
+    axis: Option<StickAxisSpec>,
+    sensitivity: Option<u32>,
+    invert_x: Option<bool>,
+    invert_y: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for BindingConfig {
@@ -360,6 +457,11 @@ impl<'de> Deserialize<'de> for BindingConfig {
             hold_ms: Option<JitterRange>,
             initial_delay_ms: Option<JitterRange>,
             repeat: Option<bool>,
+            target: Option<StickTargetSpec>,
+            axis: Option<StickAxisSpec>,
+            sensitivity: Option<u32>,
+            invert_x: Option<bool>,
+            invert_y: Option<bool>,
         }
 
         let repr = Repr::deserialize(deserializer)?;
@@ -371,6 +473,11 @@ impl<'de> Deserialize<'de> for BindingConfig {
             hold_ms: repr.hold_ms,
             initial_delay_ms: repr.initial_delay_ms,
             repeat: repr.repeat,
+            target: repr.target,
+            axis: repr.axis,
+            sensitivity: repr.sensitivity,
+            invert_x: repr.invert_x,
+            invert_y: repr.invert_y,
         };
 
         let mut outputs = Vec::with_capacity(repr.outputs.len() + usize::from(repr.key.is_some()));
@@ -383,18 +490,43 @@ impl<'de> Deserialize<'de> for BindingConfig {
                 hold_ms: None,
                 initial_delay_ms: None,
                 repeat: None,
+                target: None,
+                axis: None,
+                sensitivity: None,
+                invert_x: None,
+                invert_y: None,
                 steps: Vec::new(),
             };
-            outputs.push(build_output(&shorthand, &defaults).map_err(de::Error::custom)?);
+            outputs.push(build_output(&shorthand, from, &defaults).map_err(de::Error::custom)?);
         }
         for output in &repr.outputs {
-            outputs.push(build_output(output, &defaults).map_err(de::Error::custom)?);
+            outputs.push(build_output(output, from, &defaults).map_err(de::Error::custom)?);
         }
 
-        if outputs.is_empty() {
+        // A binding whose `mode` is `stick` needs no `key`: the deflection rate is
+        // the output, in the same way that `key` is for a hold or a sequence.
+        let stick_by_default = repr.mode == Some(OutputMode::Stick);
+        if outputs.is_empty() && !stick_by_default {
             return Err(de::Error::custom(
                 "a binding needs `key` or at least one entry in `outputs`",
             ));
+        }
+        if outputs.is_empty() {
+            let implicit = OutputRepr {
+                key: None,
+                mode: Some(OutputMode::Stick),
+                pause_ms: None,
+                hold_ms: None,
+                initial_delay_ms: None,
+                repeat: None,
+                target: None,
+                axis: None,
+                sensitivity: None,
+                invert_x: None,
+                invert_y: None,
+                steps: Vec::new(),
+            };
+            outputs.push(build_output(&implicit, from, &defaults).map_err(de::Error::custom)?);
         }
 
         Ok(Self { from, outputs })
@@ -402,7 +534,14 @@ impl<'de> Deserialize<'de> for BindingConfig {
 }
 
 /// Turns one deserialised output entry into a concrete [`OutputSpec`].
-fn build_output(repr: &OutputRepr, defaults: &Defaults) -> Result<OutputSpec, String> {
+///
+/// `from` is needed because a `stick` output only makes sense on a stick axis;
+/// checking it here keeps the error next to the entry that caused it.
+fn build_output(
+    repr: &OutputRepr,
+    from: Trigger,
+    defaults: &Defaults,
+) -> Result<OutputSpec, String> {
     let mode = repr.mode.or(defaults.mode).unwrap_or_default();
     let initial_delay_ms = repr
         .initial_delay_ms
@@ -410,6 +549,41 @@ fn build_output(repr: &OutputRepr, defaults: &Defaults) -> Result<OutputSpec, St
         .unwrap_or(DEFAULT_INITIAL_DELAY);
     let pause_ms = repr.pause_ms.or(defaults.pause_ms);
     let hold_ms = repr.hold_ms.or(defaults.hold_ms);
+
+    if let Some(problem) = check_stick_pairing(from, mode) {
+        return Err(problem);
+    }
+    if mode != OutputMode::Stick
+        && (repr.target.is_some()
+            || repr.axis.is_some()
+            || repr.sensitivity.is_some()
+            || repr.invert_x.is_some()
+            || repr.invert_y.is_some()
+            || defaults.target.is_some()
+            || defaults.axis.is_some()
+            || defaults.sensitivity.is_some()
+            || defaults.invert_x.is_some()
+            || defaults.invert_y.is_some())
+    {
+        return Err(format!(
+            "`target`, `axis`, `sensitivity`, `invert_x` and `invert_y` only apply to a `stick` \
+             output, but this one is `{}`",
+            mode.name()
+        ));
+    }
+    if mode == OutputMode::Stick
+        && (repr.key.is_some()
+            || !repr.steps.is_empty()
+            || repr.repeat.is_some()
+            || pause_ms.is_some()
+            || hold_ms.is_some())
+    {
+        return Err(
+            "a `stick` output moves the pointer or scrolls; `key`, `steps`, `repeat`, `pause_ms` \
+             and `hold_ms` do not apply to it"
+                .to_owned(),
+        );
+    }
 
     match mode {
         OutputMode::Hold => Ok(OutputSpec::Hold {
@@ -451,15 +625,45 @@ fn build_output(repr: &OutputRepr, defaults: &Defaults) -> Result<OutputSpec, St
                 initial_delay_ms,
             })
         }
+        OutputMode::Stick => Ok(OutputSpec::Stick {
+            target: repr.target.or(defaults.target).unwrap_or_default(),
+            axes: repr.axis.or(defaults.axis).unwrap_or_default(),
+            sensitivity: repr
+                .sensitivity
+                .or(defaults.sensitivity)
+                .unwrap_or(DEFAULT_STICK_SENSITIVITY),
+            invert_x: repr.invert_x.or(defaults.invert_x).unwrap_or(false),
+            invert_y: repr.invert_y.or(defaults.invert_y).unwrap_or(false),
+            initial_delay_ms,
+        }),
+    }
+}
+
+/// Checks that a `stick` output sits on a stick axis, and that a stick axis is
+/// only used for a `stick` output.
+///
+/// Returns a message describing the mismatch.
+fn check_stick_pairing(from: Trigger, mode: OutputMode) -> Option<String> {
+    let axis = matches!(from, Trigger::StickAxis(_));
+    match (axis, mode) {
+        (false, OutputMode::Stick) => Some(format!(
+            "a `stick` output needs a stick axis as its trigger (`LS_AXIS` or `RS_AXIS`), \
+             not {from}"
+        )),
+        (true, OutputMode::Hold | OutputMode::Sequence) => Some(format!(
+            "`{from}` needs `mode: stick`; a stick axis cannot press a key, and a direction \
+             such as `LS_UP` is the way to turn a stick into a key"
+        )),
+        _ => None,
     }
 }
 
 /// Parses the `from` half of a binding according to its `source`.
 fn parse_trigger(source: InputSource, text: &str) -> Result<Trigger, String> {
     match source {
-        InputSource::Controller => Button::parse(text)
-            .map(Trigger::Button)
-            .map_err(|error| error.to_string()),
+        InputSource::Controller => {
+            Trigger::parse_controller(text).map_err(|error| error.to_string())
+        }
         InputSource::Keyboard => match Key::parse(text).map_err(|error| error.to_string())? {
             Key::Keyboard(key) => Ok(Trigger::Keyboard(key)),
             Key::Mouse(_) => Err(format!(
@@ -503,6 +707,9 @@ pub struct DeviceConfig {
     /// Analog triggers count as pressed at or above this value.
     #[serde(default = "default_trigger_threshold")]
     pub trigger_threshold: u8,
+    /// Stick push, in `XInput` units below which the stick counts as centred.
+    #[serde(default = "default_stick_deadzone")]
+    pub stick_deadzone: u16,
 }
 
 impl Default for DeviceConfig {
@@ -511,6 +718,7 @@ impl Default for DeviceConfig {
             index: 0,
             poll_interval_ms: DEFAULT_POLL_INTERVAL_MS,
             trigger_threshold: DEFAULT_TRIGGER_THRESHOLD,
+            stick_deadzone: DEFAULT_STICK_DEADZONE,
         }
     }
 }
@@ -521,6 +729,10 @@ fn default_poll_interval() -> u64 {
 
 fn default_trigger_threshold() -> u8 {
     DEFAULT_TRIGGER_THRESHOLD
+}
+
+fn default_stick_deadzone() -> u16 {
+    DEFAULT_STICK_DEADZONE
 }
 
 /// How synthetic input is delivered.
@@ -691,7 +903,7 @@ impl Config {
             .iter()
             .filter_map(|binding| match binding.from {
                 Trigger::Keyboard(key) => Some(key),
-                Trigger::Button(_) => None,
+                Trigger::Button(_) | Trigger::StickDirection { .. } | Trigger::StickAxis(_) => None,
             })
             .collect();
         keys.sort_unstable();
@@ -771,6 +983,20 @@ impl Config {
         if self.device.trigger_threshold == 0 {
             issues.push("device.trigger_threshold must be at least 1".to_owned());
         }
+        if self.device.stick_deadzone == 0 {
+            issues.push(
+                "device.stick_deadzone must be at least 1; use 0 only by setting a direction \
+                 binding instead"
+                    .to_owned(),
+            );
+        }
+        if self.device.stick_deadzone > MAX_STICK_DEADZONE {
+            issues.push(format!(
+                "device.stick_deadzone {} is too high; the stick could never leave the \
+                 deadzone (limit {MAX_STICK_DEADZONE})",
+                self.device.stick_deadzone
+            ));
+        }
 
         issues
     }
@@ -825,6 +1051,7 @@ impl Config {
                 }
                 check_output(&mut issues, number, output);
             }
+            check_stick_outputs(&mut issues, number, binding);
         }
 
         // Keyboard triggers are read with `GetAsyncKeyState`, which also reports
@@ -870,10 +1097,10 @@ impl Config {
     }
 }
 
-/// Checks the timing of one output.
+/// Checks the timing and settings of one output.
 ///
-/// A `hold` needs a sensible duration, and a `sequence` a valid hold and pause
-/// for every step.
+/// A `hold` needs a sensible duration, a `sequence` a valid hold and pause for
+/// every step, and a `stick` a usable rate.
 fn check_output(issues: &mut Vec<String>, number: usize, output: &OutputSpec) {
     let label = output.mode().name();
     check_delay(
@@ -915,7 +1142,58 @@ fn check_output(issues: &mut Vec<String>, number: usize, output: &OutputSpec) {
                 );
             }
         }
+        OutputSpec::Stick { sensitivity, .. } => {
+            if *sensitivity == 0 {
+                issues.push(format!(
+                    "binding {number}: stick sensitivity must be at least 1; use 1 for the \
+                     slowest usable rate"
+                ));
+            }
+            if *sensitivity > MAX_STICK_SENSITIVITY {
+                issues.push(format!(
+                    "binding {number}: stick sensitivity {sensitivity} is unreasonably high \
+                     (limit {MAX_STICK_SENSITIVITY})"
+                ));
+            }
+        }
     }
+}
+
+/// Checks a binding's `stick` outputs against each other.
+///
+/// Two outputs driving the same target on overlapping axes would add up, which
+/// looks like a broken sensitivity instead of an obvious doubling.
+fn check_stick_outputs(issues: &mut Vec<String>, number: usize, binding: &BindingConfig) {
+    let mut seen: Vec<(StickTargetSpec, StickAxisSpec)> = Vec::new();
+
+    for output in &binding.outputs {
+        let OutputSpec::Stick { target, axes, .. } = *output else {
+            continue;
+        };
+
+        let overlaps = seen.iter().any(|(seen_target, seen_axes)| {
+            *seen_target == target && axes_overlap(*seen_axes, axes)
+        });
+        if overlaps {
+            issues.push(format!(
+                "binding {number}: more than one `stick` output drives {} on the same axis; \
+                 raise `sensitivity` instead of adding a second output",
+                target.name()
+            ));
+        }
+        seen.push((target, axes));
+    }
+}
+
+/// Whether two axis filters read at least one shared axis.
+const fn axes_overlap(left: StickAxisSpec, right: StickAxisSpec) -> bool {
+    matches!(
+        (left, right),
+        (StickAxisSpec::Both, _)
+            | (_, StickAxisSpec::Both)
+            | (StickAxisSpec::Horizontal, StickAxisSpec::Horizontal)
+            | (StickAxisSpec::Vertical, StickAxisSpec::Vertical)
+    )
 }
 
 fn check_range(issues: &mut Vec<String>, number: usize, field: &str, range: JitterRange) {

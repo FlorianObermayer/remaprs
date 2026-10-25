@@ -54,7 +54,7 @@ The annotated reference is examples/remaprs.yaml; README.md documents every key.
     // command name itself, and passing both printed "remaprs remaprs 0.1.0".
     version = env!("CARGO_PKG_VERSION"),
     disable_version_flag = true,
-    about = "Turns a held controller button or keyboard key into randomized keyboard, mouse or sequenced input",
+    about = "Turns a held controller button, stick direction or keyboard key into randomized keyboard, mouse, pointer or sequenced input",
     // Printed above the description so the version is the first thing `-h`
     // shows; `--version` alone is easy to forget when filing a bug report.
     before_help = concat!("remaprs ", env!("CARGO_PKG_VERSION")),

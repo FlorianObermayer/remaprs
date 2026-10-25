@@ -2,14 +2,19 @@
 
 ![AI-assisted](https://img.shields.io/badge/AI--assisted-GitHub%20Copilot-6e40c9)
 
-Rebinds a held Xbox controller button or keyboard key to randomized keyboard or
-mouse input.
+Rebinds a held Xbox controller button, stick direction or keyboard key to
+randomized keyboard, mouse or pointer input.
 
 A trigger drives one or more outputs in parallel. An output either **holds** a
-key down, or plays a **sequence** of press/hold/pause steps. A sequence with a
-single step that repeats is a plain spam: while the trigger is held, the program
-presses the key, releases it after `hold_ms`, waits `pause_ms`, and repeats.
-Releasing the trigger releases the key immediately.
+key down, plays a **sequence** of press/hold/pause steps, or turns stick
+deflection into **continuous** pointer motion. A sequence with a single step
+that repeats is a plain spam: while the trigger is held, the program presses the
+key, releases it after `hold_ms`, waits `pause_ms`, and repeats. Releasing the
+trigger releases the key immediately.
+
+Sticks work in both directions, with no driver: `from: LS_UP` drives ordinary
+outputs, and `from: RS_AXIS` with `mode: stick` moves the pointer or scrolls the
+wheel in proportion to how far the stick is pushed.
 
 ```text
 hold A  ──┬─────────────────────────────────────────────
@@ -169,14 +174,18 @@ All outputs of a binding start together and run in parallel.
 | Field              | Meaning                                                                  | Default    |
 | ------------------ | ------------------------------------------------------------------------ | ---------- |
 | `source`           | `controller` or `keyboard`; tells the two `from` namespaces apart          | `controller` |
-| `from`             | Controller button or, with `source: keyboard`, a keyboard key             | required   |
+| `from`             | Controller button, stick direction/axis, or a keyboard key                | required   |
 | `key`              | Shorthand for a one-step repeating sequence                              | —          |
 | `outputs`          | List of outputs, each with its own `mode` (see below)                     | —          |
-| `mode`             | `sequence` or `hold`; applies to `key` and is the default for `outputs`   | `sequence` |
+| `mode`             | `sequence`, `hold` or `stick`; applies to `key` and is the default for `outputs` | `sequence` |
 | `pause_ms`         | How long the key stays up between presses, counted from the release. The cycle is `hold_ms + pause_ms`. `40`, or `[40, 90]` | `[40, 90]` |
 | `hold_ms`          | How long each press stays down. `hold`: omit to keep the key down until the trigger is released | `[15, 35]` |
 | `initial_delay_ms` | Delay between the trigger going down and the first press. `0` fires at once; same syntax | `0`        |
 | `repeat`           | Restart after the last step                                             | `true`     |
+| `target`           | `stick` only: `mouse` (pixels) or `scroll` (wheel notches per second) | `mouse` |
+| `axis`             | `stick` only: `both`, `horizontal` or `vertical`                        | `both` |
+| `sensitivity`      | `stick` only: rate at full deflection, per second                      | `800` |
+| `invert_x`, `invert_y` | `stick` only: flip an axis                                          | `false` |
 
 A single value means "always this exact delay", which makes a mapping perfectly
 regular: `hold_ms: 15` with `pause_ms: 50` presses at t0, t+65, t+130.
@@ -188,6 +197,19 @@ key comes up, are both valid.
 
 **Buttons:** `A` `B` `X` `Y` `LB` `RB` `LS` `RS` `BACK` `START`
 `UP` `DOWN` `LEFT` `RIGHT` `LT` `RT`.
+
+**D-pad diagonals:** `DPAD_UP_LEFT` `DPAD_UP_RIGHT` `DPAD_DOWN_LEFT`
+`DPAD_DOWN_RIGHT`. A diagonal counts as pressed only while both of its
+directions are held, so it can be mapped alongside the cardinals.
+
+**Stick directions:** `LS_` or `RS_` followed by `UP`, `DOWN`, `LEFT`, `RIGHT`,
+`UP_LEFT`, `UP_RIGHT`, `DOWN_LEFT` or `DOWN_RIGHT`, for example `LS_UP` or
+`RS_DOWN_LEFT`. A direction fires when the push clears
+`device.stick_deadzone` and lands in that eighth of the circle; see
+[Sticks](#sticks). `LS` and `RS` on their own remain the stick *clicks*.
+
+**Stick axes:** `LS_AXIS` and `RS_AXIS` read the whole stick and are only valid
+with `mode: stick`.
 
 **Keys** (`key`, and `from` when `source: keyboard`): any letter, digit,
 `F1`-`F24`, plus `SPACE` `ENTER` `TAB` `ESCAPE` `BACKSPACE` `DELETE` `INSERT`
@@ -250,6 +272,8 @@ The modes are:
 * `hold` — press the key once and keep it down. Without `hold_ms` it stays down
   until the trigger is released; with `hold_ms` it comes up on its own, which
   lets a hold outlast or undercut a sequence running beside it.
+* `stick` — turn stick deflection into pointer motion or wheel scrolling; see
+  [Sticks](#sticks).
 
 #### Sequences
 
@@ -307,6 +331,60 @@ bindings:
 | `index`             | XInput slot, 0-3                       | `0`     |
 | `poll_interval_ms`  | Controller read cadence                | `4`     |
 | `trigger_threshold` | Trigger value (0-255) that counts as pressed | `30` |
+| `stick_deadzone`    | Radial distance from centre (0-32767) below which the stick counts as centred | `7849` |
+
+### Sticks
+
+Both sticks are read. They can be used on either side of the pipeline, and
+neither needs a driver.
+
+**As a trigger.** A stick direction behaves like a button, so anything that
+works with `from: A` works with `from: LS_UP`:
+
+```yaml
+bindings:
+  - from: LS_UP
+    key: W
+  - from: RS_DOWN_RIGHT
+    key: MOUSE_LEFT
+```
+
+The eight directions per stick are `UP`, `DOWN`, `LEFT`, `RIGHT` and the four
+diagonals. A direction fires when the push is further from the centre than
+`device.stick_deadzone` and lies in that eighth of the circle (each diagonal
+sector spans 45°, so the boundary is 22.5° from the cardinal). Diagonals are
+therefore octants, not "both cardinals held" as on the d-pad.
+
+**As a continuous output.** `mode: stick` applies the deflection itself rather
+than pressing anything:
+
+```yaml
+bindings:
+  - from: RS_AXIS
+    mode: stick
+    target: mouse       # mouse (pixels/s) or scroll (notches/s)
+    sensitivity: 800    # rate at full deflection
+    axis: both          # both | horizontal | vertical
+    invert_x: false
+    invert_y: false
+```
+
+Pushing further moves faster: the deflection is rescaled past the deadzone, so
+the deadzone edge gives no motion and the rim gives `sensitivity`. The deadzone
+is measured radially, so anything that counts as a direction also produces
+motion, and speed depends only on how far the stick is pushed — never on the
+angle. A rotating stick therefore steers the pointer at a constant speed; at
+`1000 px/s`, a quarter turn in half a second sweeps the pointer around a corner
+rather than along a straight line.
+
+The distance follows elapsed time, so the speed does not depend on
+`poll_interval_ms`, and sub-pixel remainders are carried so even a rate of
+1 px/s keeps moving. A single tick is capped at 4096 px so a stalled loop cannot
+fling the pointer.
+
+A stick axis only works with `mode: stick`, and `mode: stick` only works with a
+stick axis: a key cannot be "pressed proportionally". Two `stick` outputs on the
+same axis are rejected because they would silently add up.
 
 ### `output`
 
@@ -442,7 +520,12 @@ Check, in order:
   from the recovery point instead of replaying the missed presses in a burst —
   for multi-step sequences too.
 * A physical release forces an immediate key-up regardless of phase, cancels a
-  pending sequence step, and leaves nothing held.
+  pending sequence step, and leaves nothing held. A stick output has nothing to
+  release, so letting go simply stops the motion.
+* A `stick` output advances on the same loop, using the time that actually
+  passed since its previous tick; the remainder below one pixel or notch is
+  carried, so a slow rate still moves and a different poll interval does not
+  change the speed.
 * The loop sleeps until the earlier of the next poll and the next scheduled
   event, so the configured delays are honoured to about a millisecond.
 * `timeBeginPeriod(1)` is raised for the lifetime of the process. Without it
@@ -468,6 +551,19 @@ a bug.
   applies to keyboard triggers: the physical key still arrives.
 * **`SendInput` only reaches the foreground window.** Run the tool while the game
   is focused; the `target_process` guard exists to stop it typing into other apps.
+* **Stick output is mouse and wheel, not a virtual pad.** Making a game see a
+  synthetic stick requires a kernel driver (ViGEmBus and similar), which this
+  project deliberately does not use. Stick *input* works fully: directions,
+  d-pad diagonals and rates.
+* **No hysteresis between stick directions.** A stick held exactly on a 22.5°
+  boundary can alternate between two directions; the deadzone only guards the
+  centre. Pointer speed, by contrast, is constant for a constant deflection at
+  any angle, so a sweep does not pulse as it crosses the diagonals.
+
+  A quarter turn is also only three steps *as a trigger*: a 90° sweep crosses two
+  octant boundaries, so it passes through just three of the eight directions
+  (`RIGHT`, `UP_RIGHT`, `UP`) instead of following the rotation. A `mode: stick`
+  output does follow it, because the pointer velocity turns with the stick.
 * **Elevation must match.** A non-elevated process cannot inject input into an
   elevated one (UIPI). If the game runs as administrator, run this as
   administrator too.

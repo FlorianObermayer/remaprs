@@ -5,13 +5,15 @@
 //! timestamp is exact rather than approximate.
 
 use remaprs::config::JitterRange;
-use remaprs::engine::{Action, Binding, Engine, Output, Step};
-use remaprs::gamepad::{PadState, bits};
-use remaprs::input::{InputFrame, KeyboardState};
+use remaprs::engine::{Action, Binding, Engine, Output, Step, StickAxes, StickOutput, StickTarget};
+use remaprs::gamepad::{PadState, StickState, bits};
+use remaprs::input::{InputFrame, InputThresholds, KeyboardState};
 use remaprs::jitter::SeededJitter;
-use remaprs::keys::{Button, Key, KeyboardKey, Trigger};
+use remaprs::keys::{Button, Key, KeyboardKey, Stick, StickDirection, Trigger};
 
 const THRESHOLD: u8 = 30;
+/// Trigger threshold plus the default stick deadzone, which no test here uses.
+const THRESHOLDS: InputThresholds = InputThresholds::with_default_deadzone(THRESHOLD);
 /// Randomized hold range used by the jittered engine.
 const HOLD: JitterRange = JitterRange::new(15, 35);
 /// Randomized pause range used by the jittered engine.
@@ -97,7 +99,7 @@ fn engine_with(outputs: Vec<Output>) -> Engine {
             from: Trigger::Button(Button::A),
             outputs,
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     )
 }
@@ -111,7 +113,7 @@ fn fixed_engine(period: u64, hold: u64) -> Engine {
             period,
             hold,
         )],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     )
 }
@@ -128,7 +130,7 @@ fn delayed_engine(period: u64, hold: u64, delay: u64) -> Engine {
         repeat: true,
         initial_delay: JitterRange::fixed(delay),
     };
-    Engine::new(vec![binding], THRESHOLD, Box::new(SeededJitter::new(1)))
+    Engine::new(vec![binding], THRESHOLDS, Box::new(SeededJitter::new(1)))
 }
 
 /// Engine with randomized ranges.
@@ -146,7 +148,7 @@ fn jittered_engine(seed: u64) -> Engine {
                 initial_delay: JitterRange::fixed(0),
             }],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(seed)),
     )
 }
@@ -360,6 +362,9 @@ fn every_press_is_released_before_the_next_starts() {
                 assert!(down, "released without a press at {at} ms");
                 down = false;
             }
+            Action::MouseMove { .. } | Action::Scroll { .. } => {
+                panic!("a key sequence must not emit motion: {action:?} at {at} ms")
+            }
         }
     }
 }
@@ -391,7 +396,7 @@ fn release_all_before_the_first_press_is_a_no_op() {
 fn analog_triggers_respect_the_threshold() {
     let mut engine = Engine::new(
         vec![binding(Trigger::Button(Button::Rt), spacebar(), 50, 15)],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -399,6 +404,7 @@ fn analog_triggers_respect_the_threshold() {
         buttons: 0,
         left_trigger: 0,
         right_trigger: THRESHOLD - 1,
+        ..PadState::default()
     });
     assert_eq!(engine.on_input(0, &just_below), [] as [Action; 0]);
     assert!(engine.next_deadline().is_none());
@@ -407,6 +413,7 @@ fn analog_triggers_respect_the_threshold() {
         buttons: 0,
         left_trigger: 0,
         right_trigger: THRESHOLD,
+        ..PadState::default()
     });
     assert_eq!(
         engine.on_input(1, &at_threshold),
@@ -419,7 +426,7 @@ fn analog_triggers_respect_the_threshold() {
 fn a_keyboard_trigger_fires_without_a_controller() {
     let mut engine = Engine::new(
         vec![binding(Trigger::Keyboard(q()), spacebar(), 50, 15)],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -449,7 +456,7 @@ fn bindings_are_independent() {
                 5,
             ),
         ],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -554,7 +561,7 @@ fn one_trigger_can_spam_one_key_while_holding_another() {
                 hold(Key::parse("Z").expect("valid key")),
             ],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -598,7 +605,7 @@ fn a_hold_output_does_not_fire_the_trigger_again_while_held() {
             from: Trigger::Button(Button::X),
             outputs: vec![hold(Key::parse("Z").expect("valid key"))],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -626,7 +633,7 @@ fn a_hold_output_is_released_by_release_all() {
             from: Trigger::Button(Button::X),
             outputs: vec![hold(Key::parse("Z").expect("valid key"))],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -727,7 +734,7 @@ fn a_sequence_can_reuse_a_key_across_steps() {
         log.iter()
             .filter_map(|(_, action)| match action {
                 Action::Press(key) => Some(("press", *key)),
-                Action::Release(_) => None,
+                Action::Release(_) | Action::MouseMove { .. } | Action::Scroll { .. } => None,
             })
             .count(),
         3
@@ -800,7 +807,7 @@ fn outputs_of_a_binding_can_use_different_modes_and_timings() {
                 spam(Key::parse("B").expect("valid key"), 80, 20),
             ],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(1)),
     );
 
@@ -835,7 +842,7 @@ fn the_initial_delay_is_sampled_per_trigger_press() {
                 initial_delay: JitterRange::new(0, 40),
             }],
         }],
-        THRESHOLD,
+        THRESHOLDS,
         Box::new(SeededJitter::new(99)),
     );
 
@@ -856,4 +863,465 @@ fn the_initial_delay_is_sampled_per_trigger_press() {
 
     assert!(immediate > 0, "no trigger edge fired immediately");
     assert!(delayed > 0, "no trigger edge used the delay");
+}
+
+/// An engine with one `stick` output on the right stick.
+fn stick_engine(output: StickOutput, delay: u64) -> Engine {
+    Engine::new(
+        vec![Binding {
+            from: Trigger::StickAxis(Stick::Right),
+            outputs: vec![Output::Stick(StickOutput {
+                initial_delay: JitterRange::fixed(delay),
+                ..output
+            })],
+        }],
+        THRESHOLDS,
+        Box::new(SeededJitter::new(1)),
+    )
+}
+
+/// A mouse output at full scale on one axis.
+fn mouse_stick(sensitivity: u32, axes: StickAxes) -> StickOutput {
+    StickOutput {
+        target: StickTarget::Mouse,
+        axes,
+        sensitivity,
+        invert_x: false,
+        invert_y: false,
+        initial_delay: JitterRange::fixed(0),
+    }
+}
+
+/// A frame with the right stick pushed fully right.
+fn right_stick_right() -> InputFrame {
+    InputFrame::pad(PadState {
+        right_stick: StickState::new(i16::MAX, 0),
+        ..PadState::default()
+    })
+}
+
+/// A frame with the right stick centred.
+fn right_stick_centred() -> InputFrame {
+    InputFrame::pad(PadState::default())
+}
+
+#[test]
+fn a_stick_moves_the_pointer_in_proportion_to_elapsed_time() {
+    let mut engine = stick_engine(mouse_stick(1_000, StickAxes::Both), 0);
+    engine.on_input(0, &right_stick_right());
+
+    // 1000 px/s for 30 ms is 30 px, independent of how often we tick.
+    assert_eq!(engine.tick(10), vec![Action::MouseMove { dx: 10, dy: 0 }]);
+    assert_eq!(engine.tick(20), vec![Action::MouseMove { dx: 10, dy: 0 }]);
+    assert_eq!(engine.tick(30), vec![Action::MouseMove { dx: 10, dy: 0 }]);
+}
+
+#[test]
+fn the_pointer_distance_does_not_depend_on_the_tick_cadence() {
+    // The same 100 ms of travel, sampled at two different rates.
+    let mut fast = stick_engine(mouse_stick(500, StickAxes::Both), 0);
+    fast.on_input(0, &right_stick_right());
+    let mut fast_total = 0;
+    for step in 1..=100 {
+        for action in fast.tick(step) {
+            match action {
+                Action::MouseMove { dx, .. } => fast_total += dx,
+                other => panic!("expected motion, got {other:?}"),
+            }
+        }
+    }
+
+    let mut slow = stick_engine(mouse_stick(500, StickAxes::Both), 0);
+    slow.on_input(0, &right_stick_right());
+    let mut slow_total = 0;
+    for step in 1..=10 {
+        for action in slow.tick(step * 10) {
+            match action {
+                Action::MouseMove { dx, .. } => slow_total += dx,
+                other => panic!("expected motion, got {other:?}"),
+            }
+        }
+    }
+
+    assert_eq!(fast_total, slow_total);
+    assert_eq!(fast_total, 50, "500 px/s over 100 ms");
+}
+
+#[test]
+fn a_slow_rate_still_moves_because_remainders_are_carried() {
+    // One pixel per second: a 4 ms tick is 0.004 px, which must not round away.
+    let mut engine = stick_engine(mouse_stick(1, StickAxes::Both), 0);
+    engine.on_input(0, &right_stick_right());
+
+    let mut total = 0;
+    for step in 1..=1_000 {
+        for action in engine.tick(step * 4) {
+            if let Action::MouseMove { dx, .. } = action {
+                total += dx;
+            }
+        }
+    }
+    // ~4 s of travel at 1 px/s, so a handful of pixels rather than zero.
+    assert!((3..=6).contains(&total), "travelled {total} px");
+}
+
+#[test]
+fn a_centred_stick_emits_no_motion() {
+    let mut engine = stick_engine(mouse_stick(1_000, StickAxes::Both), 0);
+    engine.on_input(0, &right_stick_centred());
+
+    assert_eq!(engine.tick(10), [] as [Action; 0]);
+    assert_eq!(engine.tick(1_000), [] as [Action; 0]);
+}
+
+#[test]
+fn releasing_the_stick_stops_the_motion_without_releasing_a_key() {
+    let mut engine = stick_engine(mouse_stick(1_000, StickAxes::Both), 0);
+    engine.on_input(0, &right_stick_right());
+    assert_eq!(engine.tick(10), vec![Action::MouseMove { dx: 10, dy: 0 }]);
+
+    // The trigger is a stick, not a button: a release must not invent a key-up.
+    assert_eq!(
+        engine.on_input(11, &right_stick_centred()),
+        [] as [Action; 0]
+    );
+    assert_eq!(engine.tick(20), [] as [Action; 0]);
+    assert!(engine.next_deadline().is_none());
+}
+
+#[test]
+fn axes_and_inversions_are_applied() {
+    let inverted_x = StickOutput {
+        invert_x: true,
+        ..mouse_stick(1_000, StickAxes::Both)
+    };
+    let mut engine = stick_engine(inverted_x, 0);
+    engine.on_input(0, &right_stick_right());
+    assert_eq!(engine.tick(10), vec![Action::MouseMove { dx: -10, dy: 0 }]);
+
+    // A horizontal-only output ignores the vertical push entirely.
+    let mut horizontal = stick_engine(mouse_stick(1_000, StickAxes::Horizontal), 0);
+    horizontal.on_input(
+        0,
+        &InputFrame::pad(PadState {
+            right_stick: StickState::new(0, i16::MAX),
+            ..PadState::default()
+        }),
+    );
+    assert_eq!(horizontal.tick(10), [] as [Action; 0]);
+}
+
+#[test]
+fn a_scroll_output_turns_notches_instead_of_pixels() {
+    let mut engine = stick_engine(
+        StickOutput {
+            target: StickTarget::Scroll,
+            ..mouse_stick(1_000, StickAxes::Both)
+        },
+        0,
+    );
+    engine.on_input(0, &right_stick_right());
+
+    assert_eq!(
+        engine.tick(10),
+        vec![Action::Scroll {
+            horizontal: 10,
+            vertical: 0
+        }]
+    );
+}
+
+#[test]
+fn the_initial_delay_delays_the_first_motion() {
+    let mut engine = stick_engine(mouse_stick(1_000, StickAxes::Both), 30);
+    assert_eq!(engine.on_input(0, &right_stick_right()), [] as [Action; 0]);
+    assert_eq!(engine.next_deadline(), Some(30));
+
+    assert_eq!(engine.tick(29), [] as [Action; 0]);
+    // The clock starts when the delay expires, so the full 30 ms is still due.
+    assert_eq!(engine.tick(30), [] as [Action; 0]);
+    assert_eq!(engine.tick(40), vec![Action::MouseMove { dx: 10, dy: 0 }]);
+}
+
+#[test]
+fn a_stalled_loop_cannot_fling_the_pointer() {
+    let mut engine = stick_engine(mouse_stick(20_000, StickAxes::Both), 0);
+    engine.on_input(0, &right_stick_right());
+
+    // Ten seconds at 20 000 px/s would be 200 000 px without the clamp.
+    match engine.tick(10_000).as_slice() {
+        [Action::MouseMove { dx, dy }] => {
+            assert_eq!(*dx, 4_096, "clamped to the per-tick maximum");
+            assert_eq!(*dy, 0);
+        }
+        other => panic!("expected one clamped move, got {other:?}"),
+    }
+}
+
+#[test]
+fn stick_directions_drive_the_key_outputs() {
+    let mut engine = Engine::new(
+        vec![Binding {
+            from: Trigger::StickDirection {
+                stick: Stick::Left,
+                direction: StickDirection::Up,
+            },
+            outputs: vec![spam(spacebar(), 50, 15)],
+        }],
+        THRESHOLDS,
+        Box::new(SeededJitter::new(1)),
+    );
+
+    let pushed = InputFrame::pad(PadState {
+        left_stick: StickState::new(0, i16::MAX),
+        ..PadState::default()
+    });
+    let mut log = Vec::new();
+    record(&mut log, 0, engine.on_input(0, &pushed));
+    run(&mut engine, 0, 100, &mut log);
+    assert_eq!(presses(&log), vec![0, 50, 100], "{log:?}");
+
+    // Letting go releases the held key at once, like any other trigger.
+    let centred = InputFrame::pad(PadState::default());
+    record(&mut log, 101, engine.on_input(101, &centred));
+    assert_eq!(log.last(), Some(&(101, Action::Release(spacebar()))));
+}
+
+#[test]
+fn a_dpad_diagonal_drives_a_binding() {
+    let mut engine = Engine::new(
+        vec![binding(Trigger::Button(Button::UpLeft), spacebar(), 50, 10)],
+        THRESHOLDS,
+        Box::new(SeededJitter::new(1)),
+    );
+
+    let up_left = InputFrame::pad(PadState::button(bits::DPAD_UP | bits::DPAD_LEFT));
+    assert_eq!(
+        engine.on_input(0, &up_left),
+        vec![Action::Press(spacebar())]
+    );
+
+    let up_only = InputFrame::pad(PadState::button(bits::DPAD_UP));
+    assert_eq!(
+        engine.on_input(5, &up_only),
+        vec![Action::Release(spacebar())],
+        "losing a direction ends the diagonal"
+    );
+}
+
+#[test]
+fn uses_motion_reports_a_stick_output() {
+    let engine = stick_engine(mouse_stick(800, StickAxes::Both), 0);
+    assert!(engine.uses_motion());
+
+    let keyboard_only = Engine::new(
+        vec![binding(Trigger::Keyboard(q()), spacebar(), 50, 10)],
+        THRESHOLDS,
+        Box::new(SeededJitter::new(1)),
+    );
+    assert!(!keyboard_only.uses_motion());
+}
+
+/// A stick position on the unit circle at `degrees` (0 = right, counter-clockwise
+/// positive), pushed to `deflection` of full scale.
+fn at_angle(degrees: f64, deflection: f64) -> StickState {
+    let radians = degrees.to_radians();
+    let scale = deflection * f64::from(i16::MAX);
+    #[allow(clippy::cast_possible_truncation, reason = "the test values fit i16")]
+    StickState::new(
+        (radians.cos() * scale) as i16,
+        (radians.sin() * scale) as i16,
+    )
+}
+
+/// Sweeps the right stick counter-clockwise from `from` to `to` degrees over
+/// `duration` ms, at `deflection` of full scale, ticking every millisecond.
+///
+/// Wide tick used by [`sweep`], in milliseconds.
+///
+/// The two axes round independently, so a 1 ms tick turns a steady diagonal
+/// push into a staircase whose per-step length overstates the real speed. A
+/// wider tick keeps the rounding error small enough to compare speeds.
+const SWEEP_TICK_MS: u64 = 10;
+
+/// Sweeps the right stick counter-clockwise from `from` to `to` degrees over
+/// `duration` ms, at `deflection` of full scale.
+///
+/// Returns the net pointer displacement and the actions emitted. Net
+/// displacement is used rather than the sum of step lengths because the axes
+/// quantise independently: adding up steps counts the zigzag, not the motion.
+fn sweep(
+    from: f64,
+    to: f64,
+    duration: u64,
+    deflection: f64,
+    sensitivity: u32,
+) -> ((i64, i64), Vec<Action>) {
+    let mut engine = stick_engine(mouse_stick(sensitivity, StickAxes::Both), 0);
+    let mut actions = Vec::new();
+    let mut net = (0_i64, 0_i64);
+
+    let mut step = 0_u64;
+    loop {
+        let progress = to_f64(step) / to_f64(duration);
+        let angle = to.mul_add(progress, from * (1.0 - progress));
+        let frame = InputFrame::pad(PadState {
+            right_stick: at_angle(angle, deflection),
+            ..PadState::default()
+        });
+        actions.extend(engine.on_input(step, &frame));
+
+        if step == duration {
+            break;
+        }
+        step = (step + SWEEP_TICK_MS).min(duration);
+        actions.extend(engine.tick(step));
+    }
+
+    for action in &actions {
+        if let Action::MouseMove { dx, dy } = action {
+            net.0 += i64::from(*dx);
+            net.1 += i64::from(*dy);
+        }
+    }
+    (net, actions)
+}
+
+/// Converts a small value to `f64` for the sweep math.
+///
+/// Every value here is a tick count or a pixel delta, far below `2^53`, so the
+/// conversion is exact. Taking the string round-trip keeps an explicit cast out
+/// of the test without an `as` clippy would flag.
+fn to_f64(value: impl std::fmt::Display) -> f64 {
+    value.to_string().parse().unwrap_or_default()
+}
+
+/// Euclidean length of a displacement.
+fn length(displacement: (i64, i64)) -> f64 {
+    to_f64(displacement.0).hypot(to_f64(displacement.1))
+}
+
+#[test]
+fn a_ninety_degree_counter_clockwise_sweep_in_half_a_second_traces_an_arc() {
+    // From pointing right to pointing up, a quarter turn over 500 ms at
+    // 1000 px/s. The velocity turns, so the net displacement is the integral of
+    // a rotating vector: speed/omega * sqrt(2) = 500/pi * sqrt(2) * 2.
+    let (net, actions) = sweep(0.0, 90.0, 500, 1.0, 1_000);
+
+    let moves: Vec<(i32, i32)> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::MouseMove { dx, dy } => Some((*dx, *dy)),
+            _ => None,
+        })
+        .collect();
+    assert!(!moves.is_empty(), "the sweep produced no motion");
+
+    // Counter-clockwise on the stick is up on screen, so the pointer goes right
+    // and up (negative `dy`, which is the SendInput screen convention).
+    let first = moves.first().copied().expect("motion");
+    let last = moves.last().copied().expect("motion");
+    assert!(
+        first.0 > 0 && first.1 == 0,
+        "started facing right: {first:?}"
+    );
+    // At exactly 90 degrees the push is straight up, so the horizontal step
+    // collapses to rounding noise; what matters is that the motion is upward.
+    assert!(
+        last.1 < 0 && last.1.unsigned_abs() > last.0.unsigned_abs(),
+        "ended facing up: {last:?}"
+    );
+
+    // Every step moves right and up, never down again: the sweep is monotonic.
+    for (dx, dy) in &moves {
+        assert!(
+            *dx >= 0 && *dy <= 0,
+            "the pointer did not sweep monotonically: ({dx}, {dy})"
+        );
+    }
+
+    // Net displacement of a 90 degree arc at constant speed is
+    // `2 * speed / omega * sin(45°)` = `speed * T * 2 * sqrt(2) / pi` = 450 px,
+    // noticeably shorter than the 500 px straight-line path a non-rotating
+    // output would produce over the same time.
+    let expected = 1_000.0 * 0.5 * 2.0 * std::f64::consts::SQRT_2 / std::f64::consts::PI;
+    let actual = length(net);
+    assert!(
+        (expected * 0.95..=expected * 1.05).contains(&actual),
+        "expected a net displacement of about {expected:.0} px, got {actual:.0} px"
+    );
+    assert!(
+        actual < 500.0,
+        "a rotating output must not travel like a fixed one: {actual:.0} px"
+    );
+}
+
+#[test]
+fn a_constant_deflection_keeps_a_constant_speed_through_the_whole_turn() {
+    // The defect this guards: rescaling each axis on its own made a diagonal push
+    // travel at 1/sqrt(2) of a cardinal one, so a sweep pulsed four times per
+    // turn. Net displacement over a fixed direction isolates that.
+    let mut speeds = Vec::new();
+    for angle in [0.0, 22.5, 45.0, 67.5, 90.0, 135.0, 180.0, 270.0] {
+        let (net, _) = sweep(angle, angle, 200, 0.9, 1_000);
+        speeds.push((angle, length(net)));
+    }
+
+    let reference = speeds[0].1;
+    for (angle, travelled) in &speeds {
+        let ratio = travelled / reference;
+        assert!(
+            (0.97..=1.03).contains(&ratio),
+            "speed at {angle} degrees is {ratio:.3} of the cardinal speed"
+        );
+    }
+}
+
+#[test]
+fn no_direction_fires_without_also_producing_motion() {
+    // The defect this guards: at 45 degrees a push could clear the radial
+    // deadzone (so the direction trigger fired) while both axes stayed inside a
+    // per-axis deadzone (so `effective` returned nothing).
+    let deadzone = 7_849;
+    let mut checked = 0;
+    for angle in 0..360 {
+        for deflection in [0.25, 0.5, 0.75, 1.0] {
+            let state = at_angle(f64::from(angle), deflection);
+            let direction = state.direction(deadzone);
+            let (x, y) = state.effective(deadzone);
+            let moving = x != 0 || y != 0;
+
+            assert_eq!(
+                direction.is_some(),
+                moving,
+                "{angle} degrees at {deflection} of full scale: direction={direction:?} motion=({x}, {y})"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 1_000);
+}
+
+#[test]
+fn the_direction_crossings_of_a_quarter_turn_are_sectoral() {
+    // A 90 degree sweep crosses two octant boundaries, at 22.5 and 67.5.
+    let mut seen = Vec::new();
+    for step in 0..=500 {
+        let angle = f64::from(step) * 90.0 / 500.0;
+        let state = at_angle(angle, 1.0);
+        let direction = state.direction(THRESHOLDS.stick_deadzone);
+        if seen.last() != Some(&direction) {
+            seen.push(direction);
+        }
+    }
+
+    assert_eq!(
+        seen,
+        vec![
+            Some(StickDirection::Right),
+            Some(StickDirection::UpRight),
+            Some(StickDirection::Up),
+        ],
+        "a quarter turn spans three sectors, not a smooth rotation"
+    );
 }

@@ -1,7 +1,10 @@
 //! Configuration parsing, defaults and validation.
 
-use remaprs::config::{BindingConfig, Config, JitterRange, KeyMode, OutputMode, OutputSpec};
-use remaprs::keys::{Key, KeyboardKey, Trigger};
+use remaprs::config::{
+    BindingConfig, Config, JitterRange, KeyMode, OutputMode, OutputSpec, StickAxisSpec,
+    StickTargetSpec,
+};
+use remaprs::keys::{Button, Key, KeyboardKey, Stick, StickDirection, Trigger};
 
 /// The `(key, hold, pause, initial_delay)` of a one-step sequence, which is how
 /// a plain spam is written.
@@ -26,6 +29,7 @@ fn output_key(output: &OutputSpec) -> Key {
     match output {
         OutputSpec::Hold { key, .. } => *key,
         OutputSpec::Sequence { steps, .. } => steps[0].key,
+        other @ OutputSpec::Stick { .. } => panic!("a stick output emits no key, got {other:?}"),
     }
 }
 
@@ -194,7 +198,7 @@ bindings:
                 );
                 assert_eq!(*initial_delay_ms, JitterRange::fixed(0));
             }
-            other @ OutputSpec::Sequence { .. } => {
+            other @ (OutputSpec::Sequence { .. } | OutputSpec::Stick { .. }) => {
                 panic!("expected a hold output, got {other:?}")
             }
         }
@@ -305,7 +309,9 @@ bindings:
             assert!(*repeat, "sequences loop by default");
             assert_eq!(*initial_delay_ms, JitterRange::new(0, 50));
         }
-        other @ OutputSpec::Hold { .. } => panic!("expected a sequence, got {other:?}"),
+        other @ (OutputSpec::Hold { .. } | OutputSpec::Stick { .. }) => {
+            panic!("expected a sequence, got {other:?}")
+        }
     }
     assert!(config.validate().is_empty(), "{:?}", config.validate());
 }
@@ -327,7 +333,9 @@ bindings:
 
     match &config.bindings[0].outputs[0] {
         OutputSpec::Sequence { repeat, .. } => assert!(!*repeat),
-        other @ OutputSpec::Hold { .. } => panic!("expected a sequence, got {other:?}"),
+        other @ (OutputSpec::Hold { .. } | OutputSpec::Stick { .. }) => {
+            panic!("expected a sequence, got {other:?}")
+        }
     }
 }
 
@@ -359,7 +367,9 @@ bindings:
             );
             assert_eq!(steps[1].hold_ms, JitterRange::fixed(10), "step override");
         }
-        other @ OutputSpec::Hold { .. } => panic!("expected a sequence, got {other:?}"),
+        other @ (OutputSpec::Hold { .. } | OutputSpec::Stick { .. }) => {
+            panic!("expected a sequence, got {other:?}")
+        }
     }
 }
 
@@ -818,4 +828,227 @@ fn list_buttons_only_needs_a_valid_device() {
 
     assert_eq!(config.validate_device(), [] as [std::string::String; 0]);
     assert_ne!(config.validate(), [] as [std::string::String; 0]);
+}
+
+#[test]
+fn parses_a_stick_output() {
+    let config = Config::from_yaml(
+        "\
+bindings:
+  - from: RS_AXIS
+    outputs:
+      - mode: stick
+        target: scroll
+        axis: vertical
+        sensitivity: 1200
+        invert_y: true
+        initial_delay_ms: 20
+",
+    )
+    .expect("valid config");
+
+    match &config.bindings[0].outputs[0] {
+        OutputSpec::Stick {
+            target,
+            axes,
+            sensitivity,
+            invert_x,
+            invert_y,
+            initial_delay_ms,
+        } => {
+            assert_eq!(*target, StickTargetSpec::Scroll);
+            assert_eq!(*axes, StickAxisSpec::Vertical);
+            assert_eq!(*sensitivity, 1_200);
+            assert!(!*invert_x);
+            assert!(*invert_y);
+            assert_eq!(*initial_delay_ms, JitterRange::fixed(20));
+        }
+        other => panic!("expected a stick output, got {other:?}"),
+    }
+    assert!(config.validate().is_empty(), "{:?}", config.validate());
+}
+
+#[test]
+fn stick_outputs_have_sensible_defaults() {
+    let config =
+        Config::from_yaml("bindings:\n  - from: LS_AXIS\n    mode: stick\n").expect("valid config");
+
+    match &config.bindings[0].outputs[0] {
+        OutputSpec::Stick {
+            target,
+            axes,
+            sensitivity,
+            invert_x,
+            invert_y,
+            initial_delay_ms,
+        } => {
+            assert_eq!(*target, StickTargetSpec::Mouse);
+            assert_eq!(*axes, StickAxisSpec::Both);
+            assert_eq!(*sensitivity, remaprs::config::DEFAULT_STICK_SENSITIVITY);
+            assert!(!*invert_x);
+            assert!(!*invert_y);
+            assert_eq!(*initial_delay_ms, JitterRange::fixed(0));
+        }
+        other => panic!("expected a stick output, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_stick_output_needs_an_axis_trigger() {
+    let error = Config::from_yaml(
+        "\
+bindings:
+  - from: A
+    mode: stick
+",
+    )
+    .expect_err("a button cannot drive a stick output");
+
+    assert!(error.to_string().contains("LS_AXIS"), "{error}");
+}
+
+#[test]
+fn an_axis_trigger_needs_a_stick_output() {
+    let error = Config::from_yaml("bindings:\n  - from: LS_AXIS\n    key: W\n")
+        .expect_err("an axis cannot press a key");
+
+    assert!(error.to_string().contains("mode: stick"), "{error}");
+}
+
+#[test]
+fn a_direction_trigger_can_drive_a_key() {
+    let config = Config::from_yaml("bindings:\n  - from: LS_UP\n    key: W\n")
+        .expect("a direction is a digital trigger");
+
+    assert_eq!(
+        config.bindings[0].from,
+        Trigger::StickDirection {
+            stick: Stick::Left,
+            direction: StickDirection::Up,
+        }
+    );
+    assert!(config.validate().is_empty(), "{:?}", config.validate());
+}
+
+#[test]
+fn stick_only_fields_are_rejected_on_a_key_output() {
+    let error = Config::from_yaml("bindings:\n  - from: A\n    key: W\n    sensitivity: 500\n")
+        .expect_err("sensitivity only applies to a stick output");
+
+    assert!(error.to_string().contains("only apply"), "{error}");
+}
+
+#[test]
+fn key_only_fields_are_rejected_on_a_stick_output() {
+    let error = Config::from_yaml("bindings:\n  - from: LS_AXIS\n    mode: stick\n    key: W\n")
+        .expect_err("a stick output cannot also press a key");
+
+    assert!(error.to_string().contains("do not apply"), "{error}");
+}
+
+#[test]
+fn stick_sensitivity_is_bounded() {
+    let zero =
+        Config::from_yaml("bindings:\n  - from: LS_AXIS\n    mode: stick\n    sensitivity: 0\n")
+            .expect("the value parses");
+    assert!(
+        zero.validate()
+            .iter()
+            .any(|issue| issue.contains("sensitivity must be at least 1")),
+        "{:?}",
+        zero.validate()
+    );
+
+    let high = Config::from_yaml(
+        "bindings:\n  - from: LS_AXIS\n    mode: stick\n    sensitivity: 999999\n",
+    )
+    .expect("the value parses");
+    assert!(
+        high.validate()
+            .iter()
+            .any(|issue| issue.contains("unreasonably high")),
+        "{:?}",
+        high.validate()
+    );
+}
+
+#[test]
+fn two_stick_outputs_may_not_drive_the_same_axis() {
+    let config = Config::from_yaml(
+        "\
+bindings:
+  - from: LS_AXIS
+    outputs:
+      - mode: stick
+      - mode: stick
+        axis: horizontal
+",
+    )
+    .expect("the file parses");
+
+    let issues = config.validate();
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.contains("more than one `stick` output")),
+        "{issues:?}"
+    );
+}
+
+#[test]
+fn separate_axes_on_the_same_stick_are_allowed() {
+    let config = Config::from_yaml(
+        "\
+bindings:
+  - from: LS_AXIS
+    outputs:
+      - mode: stick
+        axis: horizontal
+      - mode: stick
+        axis: vertical
+        target: scroll
+",
+    )
+    .expect("the file parses");
+
+    assert!(config.validate().is_empty(), "{:?}", config.validate());
+}
+
+#[test]
+fn the_stick_deadzone_is_validated() {
+    let too_high =
+        Config::from_yaml("device:\n  stick_deadzone: 65000\nbindings:\n  - from: A\n    key: W\n")
+            .expect("the value parses");
+    assert!(
+        too_high
+            .validate_device()
+            .iter()
+            .any(|issue| issue.contains("stick_deadzone")),
+        "{:?}",
+        too_high.validate_device()
+    );
+
+    let zero =
+        Config::from_yaml("device:\n  stick_deadzone: 0\nbindings:\n  - from: A\n    key: W\n")
+            .expect("the value parses");
+    assert!(
+        zero.validate_device()
+            .iter()
+            .any(|issue| issue.contains("stick_deadzone")),
+        "{:?}",
+        zero.validate_device()
+    );
+
+    let default = Config::from_yaml("bindings:\n  - from: A\n    key: W\n").expect("valid");
+    assert_eq!(default.device.stick_deadzone, 7_849);
+    assert_eq!(default.validate_device(), [] as [std::string::String; 0]);
+}
+
+#[test]
+fn dpad_diagonals_parse_as_controller_triggers() {
+    let config = Config::from_yaml("bindings:\n  - from: DPAD_UP_LEFT\n    key: Q\n")
+        .expect("a d-pad diagonal is a controller button");
+
+    assert_eq!(config.bindings[0].from, Trigger::Button(Button::UpLeft));
+    assert!(config.validate().is_empty(), "{:?}", config.validate());
 }

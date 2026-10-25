@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::clock::Clock;
 use crate::engine::{Action, Engine};
@@ -234,7 +234,10 @@ impl Runner {
     /// Emits a batch, holding it in `retry` when delivery fails.
     ///
     /// Emission is retried rather than treated as fatal: `SendInput` fails
-    /// while the secure desktop is up, which is a temporary condition.
+    /// while the secure desktop is up, which is a temporary condition. Relative
+    /// motion is the exception: a stale delta would jump the pointer by the
+    /// distance it was meant to cover while the desktop was unavailable, so it is
+    /// dropped and the next tick produces fresh motion.
     fn deliver(&mut self, actions: &[Action], retry: &mut Vec<Action>, emit_failing: &mut bool) {
         if actions.is_empty() {
             return;
@@ -252,7 +255,10 @@ impl Runner {
                     error!("input emission failed ({error:#}); retrying");
                     *emit_failing = true;
                 }
-                queue(retry, actions.iter().copied());
+                queue(
+                    retry,
+                    actions.iter().copied().filter(|action| !action.is_motion()),
+                );
                 // Keep running: the next iteration retries the queue.
             }
         }
@@ -263,7 +269,13 @@ impl Runner {
             return Ok(());
         }
         for action in actions {
-            debug!("{action:?}");
+            // Motion is logged at trace level: at a 4 ms poll it would otherwise
+            // drown every other line in a `debug` log.
+            if action.is_motion() {
+                trace!("{action:?}");
+            } else {
+                debug!("{action:?}");
+            }
         }
         self.emitter.emit(actions)
     }

@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use windows::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
 
-use crate::gamepad::{GamepadSource, PadState};
+use crate::gamepad::{GamepadSource, PadState, StickState};
 
 /// `ERROR_DEVICE_NOT_CONNECTED`, the error `XInputGetState` reports for an
 /// empty slot. It is an ordinary Win32 error code, not an `HRESULT`.
@@ -37,6 +37,8 @@ impl GamepadSource for XInputSource {
                 buttons: state.Gamepad.wButtons.0,
                 left_trigger: state.Gamepad.bLeftTrigger,
                 right_trigger: state.Gamepad.bRightTrigger,
+                left_stick: StickState::new(state.Gamepad.sThumbLX, state.Gamepad.sThumbLY),
+                right_stick: StickState::new(state.Gamepad.sThumbRX, state.Gamepad.sThumbRY),
             })),
             ERROR_DEVICE_NOT_CONNECTED => Ok(None),
             code => Err(anyhow!("XInputGetState failed with error {code}")),

@@ -5,8 +5,9 @@
 //!
 //! * [`cli`] parses the command line and decides which config file applies.
 //! * [`config`] turns YAML and command-line text into validated mappings.
-//! * [`engine`] is the state machine that turns a held button or key into a
-//!   stream of randomized press/release pairs.
+//! * [`engine`] is the state machine that turns a held button, stick direction
+//!   or key into a stream of randomized press/release pairs, and stick
+//!   deflection into pointer motion.
 //! * [`input`] merges controller and keyboard state into one frame.
 //! * [`logging`] sends log lines to stderr and, optionally, a file.
 //! * [`runner`] drives polling, emission and scheduling in a single thread.

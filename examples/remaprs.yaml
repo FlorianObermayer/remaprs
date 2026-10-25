@@ -19,6 +19,10 @@ device:
   poll_interval_ms: 4
   # LT and RT are analog (0-255) and count as pressed from this value up.
   trigger_threshold: 30
+  # A stick counts as pushed once it is further than this from the centre
+  # (XInput units, 0-32767), measured radially. 7849 is XInput's own default for
+  # the left stick; raise it for a worn pad that never quite returns to centre.
+  stick_deadzone: 7849
 
 output:
   # `scancode` works with DirectInput and raw-input games.
@@ -108,3 +112,37 @@ bindings:
       - key: T
         mode: hold
         hold_ms: [2000, 3000]
+
+  # Stick directions are triggers like any button: holding the left stick up
+  # fires W. The eight names are LS_/RS_ + UP, DOWN, LEFT, RIGHT, UP_LEFT,
+  # UP_RIGHT, DOWN_LEFT, DOWN_RIGHT. `LS` alone is still the stick *click*.
+  - from: LS_UP
+    key: W
+    pause_ms: [40, 90]
+    hold_ms: [15, 35]
+
+  # The d-pad has the same eight directions, spelled `DPAD_`-prefixed so the
+  # bare names stay unambiguous. A diagonal needs both of its directions held.
+  - from: DPAD_UP_LEFT
+    key: K
+
+  # The stick itself, as a continuous output: push it and the pointer moves,
+  # faster the further it is pushed. `mode: stick` is the whole output, so no
+  # `key` is needed. `target` is `mouse` (pixels) or `scroll` (wheel notches),
+  # and `sensitivity` is the rate at full deflection, per second.
+  # Use `axis: horizontal` or `vertical` to read one axis only, and
+  # `invert_x` / `invert_y` to flip a direction.
+  # - from: RS_AXIS
+  #   mode: stick
+  #   target: mouse
+  #   sensitivity: 800
+  #   axis: both
+
+  # Scrolling from the same stick, with the vertical axis inverted so pushing
+  # up scrolls up. `device.stick_deadzone` applies to both.
+  # - from: LS_AXIS
+  #   mode: stick
+  #   target: scroll
+  #   sensitivity: 6
+  #   axis: vertical
+  #   invert_y: true

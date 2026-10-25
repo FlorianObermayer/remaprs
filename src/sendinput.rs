@@ -1,14 +1,14 @@
-//! Synthetic keyboard and mouse input via `SendInput` (Windows only).
+//! Synthetic keyboard, mouse and wheel input via `SendInput` (Windows only).
 
 use std::io;
 
 use anyhow::Result;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, MapVirtualKeyW,
-    SendInput, VIRTUAL_KEY,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MOUSE_EVENT_FLAGS,
+    MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
+    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+    MOUSEEVENTF_WHEEL, MOUSEINPUT, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
 
@@ -69,6 +69,60 @@ impl KeyEmitter for SendInputEmitter {
             },
         }
     }
+
+    fn move_mouse(&mut self, dx: i32, dy: i32) -> Result<()> {
+        if dx == 0 && dy == 0 {
+            return Ok(());
+        }
+        // `MOUSEEVENTF_MOVE` without `MOUSEEVENTF_ABSOLUTE` is a relative move,
+        // so the deltas add to the game's own mouse input instead of overwriting
+        // the pointer position.
+        let input = mouse_input(MOUSEEVENTF_MOVE, 0, dx, dy);
+        Self::send(input)
+    }
+
+    fn scroll(&mut self, horizontal: i32, vertical: i32) -> Result<()> {
+        if horizontal != 0 {
+            let flags = MOUSEEVENTF_HWHEEL;
+            Self::send(mouse_input(flags, wheel_delta(horizontal), 0, 0))?;
+        }
+        if vertical != 0 {
+            Self::send(mouse_input(MOUSEEVENTF_WHEEL, wheel_delta(vertical), 0, 0))?;
+        }
+        Ok(())
+    }
+}
+
+/// Converts notch counts to the `mouseData` amount Windows expects.
+///
+/// One notch is `WHEEL_DELTA`, positive meaning up (or right, for the horizontal
+/// wheel). A negative count is expressed as an unsigned `DWORD`, which is how
+/// `MOUSEINPUT.mouseData` carries a direction.
+fn wheel_delta(notches: i32) -> u32 {
+    let delta = i64::from(WHEEL_DELTA);
+    let scaled = i64::from(notches).saturating_mul(delta);
+    if scaled < 0 {
+        // A negative scroll amount is carried as an unsigned DWORD.
+        0_u32.wrapping_sub(scaled.unsigned_abs().try_into().unwrap_or(u32::MAX))
+    } else {
+        scaled.unsigned_abs().try_into().unwrap_or(u32::MAX)
+    }
+}
+
+fn mouse_input(flags: MOUSE_EVENT_FLAGS, data: u32, dx: i32, dy: i32) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: data,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
 }
 
 fn keyboard_event(key: KeyboardKey, mode: KeyMode, key_up: bool) -> INPUT {
@@ -120,23 +174,10 @@ fn mouse_event(button: MouseButton, key_up: bool) -> Option<INPUT> {
         (MouseButton::Right, true) => (MOUSEEVENTF_RIGHTUP, 0),
         (MouseButton::Middle, false) => (MOUSEEVENTF_MIDDLEDOWN, 0),
         (MouseButton::Middle, true) => (MOUSEEVENTF_MIDDLEUP, 0),
-        (MouseButton::WheelUp, false) => (MOUSEEVENTF_WHEEL, WHEEL_DELTA),
-        // A negative scroll amount is expressed as an unsigned DWORD.
-        (MouseButton::WheelDown, false) => (MOUSEEVENTF_WHEEL, 0_u32.wrapping_sub(WHEEL_DELTA)),
+        (MouseButton::WheelUp, false) => (MOUSEEVENTF_WHEEL, wheel_delta(1)),
+        (MouseButton::WheelDown, false) => (MOUSEEVENTF_WHEEL, wheel_delta(-1)),
         (MouseButton::WheelUp | MouseButton::WheelDown, true) => return None,
     };
 
-    Some(INPUT {
-        r#type: INPUT_MOUSE,
-        Anonymous: INPUT_0 {
-            mi: MOUSEINPUT {
-                dx: 0,
-                dy: 0,
-                mouseData: data,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    })
+    Some(mouse_input(flags, data, 0, 0))
 }
